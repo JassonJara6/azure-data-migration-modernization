@@ -1,0 +1,10 @@
+.env
+data/
+artifacts/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+__pycache__/
+.pytest_cache/
+.DS_Store

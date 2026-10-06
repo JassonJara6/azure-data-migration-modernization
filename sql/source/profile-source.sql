@@ -2,15 +2,17 @@ SET NOCOUNT ON;
 USE [AdventureWorks];
 
 PRINT '=== Candidate table row counts and watermark ranges ===';
-SELECT 'Person.Person' AS table_name, COUNT_BIG(*) AS row_count, MIN(ModifiedDate) AS min_modified, MAX(ModifiedDate) AS max_modified FROM Person.Person
-UNION ALL SELECT 'Person.Address', COUNT_BIG(*), MIN(ModifiedDate), MAX(ModifiedDate) FROM Person.Address
-UNION ALL SELECT 'Production.Product', COUNT_BIG(*), MIN(ModifiedDate), MAX(ModifiedDate) FROM Production.Product
-UNION ALL SELECT 'Production.ProductCategory', COUNT_BIG(*), MIN(ModifiedDate), MAX(ModifiedDate) FROM Production.ProductCategory
-UNION ALL SELECT 'Production.ProductSubcategory', COUNT_BIG(*), MIN(ModifiedDate), MAX(ModifiedDate) FROM Production.ProductSubcategory
-UNION ALL SELECT 'Sales.Customer', COUNT_BIG(*), MIN(ModifiedDate), MAX(ModifiedDate) FROM Sales.Customer
-UNION ALL SELECT 'Sales.SalesOrderHeader', COUNT_BIG(*), MIN(ModifiedDate), MAX(ModifiedDate) FROM Sales.SalesOrderHeader
-UNION ALL SELECT 'Sales.SalesOrderDetail', COUNT_BIG(*), MIN(ModifiedDate), MAX(ModifiedDate) FROM Sales.SalesOrderDetail
-UNION ALL SELECT 'Sales.SalesTerritory', COUNT_BIG(*), MIN(ModifiedDate), MAX(ModifiedDate) FROM Sales.SalesTerritory
+SELECT 'Person.Person' AS table_name, COUNT_BIG(*) AS row_count, COUNT(DISTINCT ModifiedDate) AS distinct_modified_dates, MIN(ModifiedDate) AS min_modified, MAX(ModifiedDate) AS max_modified FROM Person.Person
+UNION ALL SELECT 'Person.Address', COUNT_BIG(*), COUNT(DISTINCT ModifiedDate), MIN(ModifiedDate), MAX(ModifiedDate) FROM Person.Address
+UNION ALL SELECT 'Person.StateProvince', COUNT_BIG(*), COUNT(DISTINCT ModifiedDate), MIN(ModifiedDate), MAX(ModifiedDate) FROM Person.StateProvince
+UNION ALL SELECT 'Person.CountryRegion', COUNT_BIG(*), COUNT(DISTINCT ModifiedDate), MIN(ModifiedDate), MAX(ModifiedDate) FROM Person.CountryRegion
+UNION ALL SELECT 'Production.Product', COUNT_BIG(*), COUNT(DISTINCT ModifiedDate), MIN(ModifiedDate), MAX(ModifiedDate) FROM Production.Product
+UNION ALL SELECT 'Production.ProductCategory', COUNT_BIG(*), COUNT(DISTINCT ModifiedDate), MIN(ModifiedDate), MAX(ModifiedDate) FROM Production.ProductCategory
+UNION ALL SELECT 'Production.ProductSubcategory', COUNT_BIG(*), COUNT(DISTINCT ModifiedDate), MIN(ModifiedDate), MAX(ModifiedDate) FROM Production.ProductSubcategory
+UNION ALL SELECT 'Sales.Customer', COUNT_BIG(*), COUNT(DISTINCT ModifiedDate), MIN(ModifiedDate), MAX(ModifiedDate) FROM Sales.Customer
+UNION ALL SELECT 'Sales.SalesOrderHeader', COUNT_BIG(*), COUNT(DISTINCT ModifiedDate), MIN(ModifiedDate), MAX(ModifiedDate) FROM Sales.SalesOrderHeader
+UNION ALL SELECT 'Sales.SalesOrderDetail', COUNT_BIG(*), COUNT(DISTINCT ModifiedDate), MIN(ModifiedDate), MAX(ModifiedDate) FROM Sales.SalesOrderDetail
+UNION ALL SELECT 'Sales.SalesTerritory', COUNT_BIG(*), COUNT(DISTINCT ModifiedDate), MIN(ModifiedDate), MAX(ModifiedDate) FROM Sales.SalesTerritory
 ORDER BY table_name;
 
 PRINT '=== Candidate primary keys ===';
@@ -21,7 +23,8 @@ JOIN sys.indexes AS i ON i.object_id = t.object_id AND i.is_primary_key = 1
 JOIN sys.index_columns AS ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
 JOIN sys.columns AS c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
 WHERE CONCAT(s.name, '.', t.name) IN
-('Person.Person', 'Person.Address', 'Production.Product', 'Production.ProductCategory',
+('Person.Person', 'Person.Address', 'Person.StateProvince', 'Person.CountryRegion',
+ 'Production.Product', 'Production.ProductCategory',
  'Production.ProductSubcategory', 'Sales.Customer', 'Sales.SalesOrderHeader',
  'Sales.SalesOrderDetail', 'Sales.SalesTerritory')
 ORDER BY table_name, ic.key_ordinal;
@@ -38,7 +41,8 @@ JOIN sys.tables AS rt ON rt.object_id = fk.referenced_object_id
 JOIN sys.schemas AS rs ON rs.schema_id = rt.schema_id
 JOIN sys.columns AS rc ON rc.object_id = rt.object_id AND rc.column_id = fkc.referenced_column_id
 WHERE CONCAT(ps.name, '.', pt.name) IN
-('Person.Person', 'Person.Address', 'Production.Product', 'Production.ProductCategory',
+('Person.Person', 'Person.Address', 'Person.StateProvince', 'Person.CountryRegion',
+ 'Production.Product', 'Production.ProductCategory',
  'Production.ProductSubcategory', 'Sales.Customer', 'Sales.SalesOrderHeader',
  'Sales.SalesOrderDetail', 'Sales.SalesTerritory')
 ORDER BY child_table, fk.name, fkc.constraint_column_id;

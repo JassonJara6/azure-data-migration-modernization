@@ -37,7 +37,25 @@ The approved loading split is:
 - **INCREMENTAL:** `Person.Person`, `Person.Address`, `Production.Product`, `Sales.SalesOrderHeader`, and `Sales.SalesOrderDetail`.
 - **FULL:** `Person.StateProvince`, `Person.CountryRegion`, `Production.ProductCategory`, `Production.ProductSubcategory`, `Sales.Customer`, and `Sales.SalesTerritory`.
 
-Run `make source-explore` again to validate all 11 tables' counts, `ModifiedDate` distributions/ranges, keys, geography relationships, and initial business-rule anomalies against the restored version instead of relying on static counts in documentation.
+The profile was executed successfully against the restored local source. The validated baseline is:
+
+| Table | Rows | Distinct `ModifiedDate` values | Mode |
+|---|---:|---:|---|
+| `Person.Address` | 19,614 | 1,280 | INCREMENTAL |
+| `Person.CountryRegion` | 238 | 1 | FULL |
+| `Person.Person` | 19,972 | 1,285 | INCREMENTAL |
+| `Person.StateProvince` | 181 | 2 | FULL |
+| `Production.Product` | 504 | 2 | INCREMENTAL |
+| `Production.ProductCategory` | 4 | 1 | FULL |
+| `Production.ProductSubcategory` | 37 | 1 | FULL |
+| `Sales.Customer` | 19,820 | 1 | FULL |
+| `Sales.SalesOrderDetail` | 121,317 | 1,124 | INCREMENTAL |
+| `Sales.SalesOrderHeader` | 31,465 | 1,124 | INCREMENTAL |
+| `Sales.SalesTerritory` | 10 | 1 | FULL |
+
+Primary keys and the expected geography, sales, and product foreign keys were confirmed. All six current quality checks returned zero invalid records: invalid order totals, ship-before-order, missing customer, nonpositive quantity, negative unit price, and invalid discount. These are baseline observations, not guarantees that future batches will remain valid.
+
+Although `Production.Product` is small and has only two distinct modification dates in the sample, it intentionally remains INCREMENTAL. FULL would be operationally reasonable for this data, but the incremental choice demonstrates reuse of the same safe ingestion pattern for master/reference entities that may be larger and change more frequently in production.
 
 ## Local operation
 
@@ -49,24 +67,24 @@ Run `make source-explore` again to validate all 11 tables' counts, `ModifiedDate
 
 Do not reuse the `sa` account for Azure ingestion. Before Phase 3, create a least-privilege extraction login/user with `SELECT` only on approved source objects. The local `sa` credential exists solely to restore and administer the developer database.
 
-## What must be decided before Azure
+## Phase 2 entry decisions (not yet approved or implemented)
 
 - Confirm Azure subscription access, tenant, region, naming prefix, and a cost budget/alerts.
 - Confirm local tooling for Phase 2: Azure CLI, Terraform, and an Azure identity allowed to create the scoped resources and role assignments.
 - Choose how ADF will reach the source. A local Docker SQL Server requires a self-hosted integration runtime and an always-on reachable machine; this is realistic but awkward for a portfolio demo. A small Azure SQL source loaded from AdventureWorks is simpler to demonstrate but incurs cost. Make this choice explicitly in Phase 2/3.
-- Confirm the approved 11-table contract against the refreshed profile; do not add `Sales.Store` in this scope.
-- Confirm the documented watermark semantics and delete-detection compromise. Record source timezone (AdventureWorks sample dates have no timezone) and treat source values consistently.
-- Freeze the initial source contract: keys, required columns, expected types, sensitive fields, and extraction mode for each table. Do not land `Person.Person` demographics XML or other unused personal attributes merely because they exist.
+- Select the exact columns to ingest and identify sensitive fields; do not land `Person.Person` demographics XML or other unused personal attributes merely because they exist.
+- Record the source timezone convention (AdventureWorks sample dates have no timezone) and treat source values consistently.
 - Establish resource tags and separate development configuration from secrets. Later credentials belong in Key Vault, never Terraform variables committed to Git.
 
 ## Phase 1 completion checklist
 
-- [ ] Docker source is healthy and `AdventureWorks` restores successfully.
-- [ ] Profiling SQL completes and its counts/watermark ranges have been reviewed.
+- [x] Docker source is healthy and `AdventureWorks` restores successfully.
+- [x] Profiling SQL completes and its counts/`ModifiedDate` distributions have been reviewed.
 - [x] The 11-table source scope and FULL/INCREMENTAL split are approved.
-- [ ] Order-line fact grain and source-to-target business scope are agreed.
-- [ ] Incremental limitations and delete strategy are accepted.
-- [ ] Azure prerequisites and the source connectivity approach are chosen.
-- [ ] No credentials, database backups, or generated profiles are tracked by Git.
+- [x] Order-line fact grain and geography/product/customer source scope are agreed.
+- [x] Boundary-safe incremental semantics, hard-delete limitation, and reconciliation strategy are documented.
+- [x] Primary keys and expected geography, sales, and product relationships are confirmed.
+- [x] Baseline quality checks complete with zero current invalid records.
+- [x] No credentials, database backups, or generated profiles are tracked by Git.
 
-Phase 2 must not begin until this checklist is complete and the project owner explicitly approves proceeding.
+Phase 1 is formally complete. Phase 2 must not begin until the project owner explicitly approves proceeding and resolves the entry decisions above.

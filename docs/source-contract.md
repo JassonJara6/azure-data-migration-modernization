@@ -1,6 +1,6 @@
 # Phase 1 source contract
 
-The Phase 1 source scope and initial extraction modes are approved below. Profiling results must still be reviewed before this contract becomes ingestion metadata in Phase 3.
+The Phase 1 source scope and initial extraction modes below were approved and validated against the local AdventureWorks source. This contract will become ingestion metadata in Phase 3; it does not implement ingestion yet.
 
 | Source object | Primary key | Extraction mode | Watermark | Rationale / expected use |
 |---|---|---|---|---|
@@ -8,7 +8,7 @@ The Phase 1 source scope and initial extraction modes are approved below. Profil
 | `Person.Address` | `AddressID` | **INCREMENTAL** | `ModifiedDate` + PK | geography attributes; enough change distribution to justify state |
 | `Person.StateProvince` | `StateProvinceID` | **FULL** | — | small reference table for geography |
 | `Person.CountryRegion` | `CountryRegionCode` | **FULL** | — | small reference table for geography |
-| `Production.Product` | `ProductID` | **INCREMENTAL** | `ModifiedDate` + PK | product dimension; enough change distribution to justify state |
+| `Production.Product` | `ProductID` | **INCREMENTAL** | `ModifiedDate` + PK | intentional demonstration of reusable master-data incremental ingestion |
 | `Production.ProductCategory` | `ProductCategoryID` | **FULL** | — | small product-hierarchy reference table |
 | `Production.ProductSubcategory` | `ProductSubcategoryID` | **FULL** | — | small product-hierarchy reference table |
 | `Sales.Customer` | `CustomerID` | **FULL** | — | customer dimension; all current rows share one `ModifiedDate` |
@@ -23,6 +23,8 @@ The Phase 1 source scope and initial extraction modes are approved below. Profil
 The presence of `ModifiedDate` does not automatically make a table a good incremental candidate. A useful watermark must vary with meaningful source changes, have understood precision and semantics, and reduce the extraction enough to justify durable state, retry, and delete-handling complexity. The small reference/dimension tables use FULL loads because their volume does not justify that complexity.
 
 `Sales.Customer` also uses FULL even though it has `ModifiedDate`: profiling found that every current row shares the same value, so it cannot usefully partition changes in this dataset. This is a deliberate data-driven exception, not a missing capability.
+
+`Production.Product` is intentionally INCREMENTAL even though this sample has only 504 rows and two distinct `ModifiedDate` values, for which a FULL load would be operationally reasonable. Keeping it incremental demonstrates that the reusable pattern supports master/reference entities that may be substantially larger and updated more frequently in a production source.
 
 For an INCREMENTAL table, do not use only `ModifiedDate > last_watermark`. Multiple rows can share a timestamp, and a failed or concurrent extraction can otherwise skip rows. Phase 3 should capture a fixed upper boundary and use a deterministic `(ModifiedDate, primary key)` cursor, for example:
 
@@ -55,4 +57,4 @@ Composite keys require a deterministic lexicographic tie-break. Persist the new 
 - `ShipDate` is null or is not earlier than `OrderDate`.
 - Header `TotalDue` reconciles to `SubTotal + TaxAmt + Freight` within the source currency precision.
 
-Thresholds, nullability, selected columns, and quarantine severity remain deliberately undecided until the Phase 1 profile is reviewed.
+Detailed thresholds, selected-column projections, and quarantine severity will be designed with the Silver implementation in Phase 4; they are not blockers to closing source discovery.

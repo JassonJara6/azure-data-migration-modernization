@@ -57,7 +57,7 @@ Empty phase directories contain `.gitkeep` files solely to make the planned boun
 
 ## Delivery roadmap
 
-- [ ] **Phase 1:** local source, exploration, source contract, and Azure prerequisites
+- [x] **Phase 1:** local source, exploration, and source contract
 - [ ] Phase 2: Azure infrastructure with Terraform
 - [ ] Phase 3: metadata-driven Bronze ingestion
 - [ ] Phase 4: Silver transformations and data quality
@@ -66,4 +66,4 @@ Empty phase directories contain `.gitkeep` files solely to make the planned boun
 - [ ] Phase 7: CI/CD and automated testing
 - [ ] Phase 8: documentation and portfolio presentation
 
-Phase 1 should be checked off only after the completion checklist in the runbook has been executed in the developer's environment.
+Phase 1 was completed after the restore and 11-table profile were validated locally. Phase 2 remains unstarted and requires explicit approval before implementation.

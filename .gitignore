@@ -5,6 +5,15 @@ artifacts/
 *.tfstate
 *.tfstate.*
 *.tfplan
+.terraform.tfstate.lock.info
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfvars
+!*.tfvars.example
 __pycache__/
 .pytest_cache/
 .DS_Store

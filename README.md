@@ -66,4 +66,4 @@ Empty phase directories contain `.gitkeep` files solely to make the planned boun
 - [ ] Phase 7: CI/CD and automated testing
 - [ ] Phase 8: documentation and portfolio presentation
 
-Phase 1 was completed after the restore and 11-table profile were validated locally. Phase 2 remains unstarted and requires explicit approval before implementation.
+Phase 1 was completed after the restore and 11-table profile were validated locally. Phase 2 has begun with only the isolated [Terraform remote-state bootstrap](terraform/bootstrap/README.md); the main Azure platform remains unimplemented.

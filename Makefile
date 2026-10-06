@@ -4,10 +4,10 @@ source-up:
 	docker compose up -d sqlserver
 
 source-setup:
-	./scripts/setup-source.sh
+	bash scripts/setup-source.sh
 
 source-explore:
-	./scripts/explore-source.sh
+	bash scripts/explore-source.sh
 
 source-down:
 	docker compose down

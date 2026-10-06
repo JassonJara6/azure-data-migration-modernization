@@ -6,6 +6,12 @@ readonly BACKUP_NAME="AdventureWorks2022.bak"
 readonly BACKUP_URL="https://github.com/Microsoft/sql-server-samples/releases/download/adventureworks/${BACKUP_NAME}"
 readonly CONTAINER_NAME="adventureworks-sql"
 
+# Git Bash otherwise rewrites Linux container paths (for example, /opt/...) as
+# Windows host paths. Scope the opt-out to docker exec; it is harmless elsewhere.
+docker_exec() {
+  MSYS_NO_PATHCONV=1 docker exec "$@"
+}
+
 cd "${ROOT_DIR}"
 
 if [[ ! -f .env ]]; then
@@ -33,7 +39,7 @@ docker compose up -d sqlserver
 sqlcmd_path="/opt/mssql-tools18/bin/sqlcmd"
 echo "Waiting for SQL Server to accept connections..."
 for attempt in {1..60}; do
-  if docker exec "${CONTAINER_NAME}" "${sqlcmd_path}" -S localhost -U sa -P "${MSSQL_SA_PASSWORD}" -C -Q "SELECT 1" -b >/dev/null 2>&1; then
+  if docker_exec "${CONTAINER_NAME}" "${sqlcmd_path}" -S localhost -U sa -P "${MSSQL_SA_PASSWORD}" -C -Q "SELECT 1" -b >/dev/null 2>&1; then
     break
   fi
   if [[ "${attempt}" == 60 ]]; then
@@ -43,7 +49,7 @@ for attempt in {1..60}; do
   sleep 2
 done
 
-docker exec -i "${CONTAINER_NAME}" "${sqlcmd_path}" \
+docker_exec -i "${CONTAINER_NAME}" "${sqlcmd_path}" \
   -S localhost -U sa -P "${MSSQL_SA_PASSWORD}" -C -b \
   -v BackupFile="/var/opt/mssql/backup/${BACKUP_NAME}" \
   < sql/source/restore-adventureworks.sql

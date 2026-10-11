@@ -10,6 +10,10 @@ locals {
     24
   )
 
+  data_factory_name = lower(
+    "adf-${var.name_prefix}-${var.environment}-${substr(md5(data.azurerm_client_config.current.subscription_id), 0, 8)}"
+  )
+
   filesystem_names = toset([
     "audit",
     "bronze",

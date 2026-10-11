@@ -36,3 +36,26 @@ resource "azurerm_storage_container" "data_lake" {
   storage_account_id    = azurerm_storage_account.data_lake.id
   container_access_type = "private"
 }
+
+resource "azurerm_data_factory" "platform" {
+  name                = local.data_factory_name
+  location            = azurerm_resource_group.platform.location
+  resource_group_name = azurerm_resource_group.platform.name
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  tags = local.common_tags
+}
+
+resource "azurerm_role_assignment" "data_factory_bronze_contributor" {
+  scope                = azurerm_storage_container.data_lake["bronze"].resource_manager_id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_data_factory.platform.identity[0].principal_id
+  principal_type       = "ServicePrincipal"
+
+  # The system-assigned service principal is created in the same operation;
+  # skipping the directory lookup avoids transient Microsoft Entra replication failures.
+  skip_service_principal_aad_check = true
+}

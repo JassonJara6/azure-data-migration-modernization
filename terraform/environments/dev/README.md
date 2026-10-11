@@ -1,10 +1,10 @@
 # Dev platform Terraform root
 
-This directory is the Terraform root for the future `admm` development platform in East US. At this step it contains only provider, environment, and remote-backend configuration—there are **no managed platform resources or module calls**. Initializing or planning this root must not change the bootstrap resources or create ADLS Gen2, Data Factory, Key Vault, Databricks, networking, SHIR, or ingestion resources.
+This directory is the Terraform root for the `admm` development platform in East US. This increment manages only the platform resource group and an ADLS Gen2 account with five filesystem boundaries. It does not create Data Factory, Databricks, Key Vault, networking, SHIR, or ingestion resources.
 
-## Remote backend
+## Remote backend and authentication
 
-The backend uses the already-deployed bootstrap resources:
+State remains in the already-deployed bootstrap backend:
 
 | Setting | Value |
 |---|---|
@@ -14,13 +14,40 @@ The backend uses the already-deployed bootstrap resources:
 | State key | `dev/platform.tfstate` |
 | Authentication | Microsoft Entra ID through Azure CLI |
 
-These names are non-secret, environment-specific backend coordinates, so they are intentionally declared in `backend.tf`. `use_azuread_auth = true` prevents Terraform from retrieving or using a storage account key. The signed-in identity therefore needs `Storage Blob Data Contributor` on the state account, which the deployed bootstrap assigned.
+The backend uses `use_azuread_auth = true`. The AzureRM provider uses the existing Azure CLI login, a runtime `TF_VAR_subscription_id`, and `storage_use_azuread = true`; no subscription ID, tenant ID, credential, storage key, or secret is committed.
 
-The AzureRM provider also uses the existing Azure CLI login. `storage_use_azuread = true` keeps any future provider-managed Azure Storage data-plane operations on Microsoft Entra ID rather than storage keys, consistent with the backend. AzureRM v4 requires a subscription ID, so it is read at runtime through `TF_VAR_subscription_id`; no subscription ID, tenant ID, credential, or secret is committed.
+## Managed resources
 
-## Initialize and verify
+Terraform will manage:
 
-Run these commands from the repository root after reviewing the configuration:
+1. Resource group `rg-admm-dev-platform` in East US.
+2. One Standard LRS, Hot-tier StorageV2 account with hierarchical namespace enabled.
+3. Five private containers—`bronze`, `silver`, `gold`, `quarantine`, and `audit`. In an HNS-enabled account, a blob container is an ADLS Gen2 filesystem. The configuration uses `azurerm_storage_container` with `storage_account_id`, which creates the filesystems through Azure Resource Manager without requiring temporary data-plane access for the deploying identity.
+
+The storage name is `st` + `admm` + `dev` + `dl` + the first eight characters of an MD5 hash of the selected subscription ID, capped at 24 characters. This is deterministic, lowercase, compliant with Storage naming rules, and unlikely to collide globally. The subscription ID is used only to derive a stable non-secret suffix.
+
+### Filesystem purposes
+
+| Filesystem | Purpose |
+|---|---|
+| `bronze` | Immutable-as-landed source extracts and ingestion metadata. |
+| `silver` | Validated, standardized, and conformed data. |
+| `gold` | Curated dimensional data products for analytics. |
+| `quarantine` | Invalid records with data-quality reason metadata. |
+| `audit` | Pipeline audit, reconciliation, and operational records. |
+
+## Security and cost decisions
+
+- Anonymous blob/container access and shared-key authentication are disabled; Azure identities will be granted RBAC in a later approved step.
+- HTTPS is mandatory, TLS 1.2 is the minimum, and cross-tenant replication is disabled.
+- Public network access remains enabled because networking/private endpoints are explicitly outside this increment. Access still requires Microsoft Entra authorization; this is not anonymous public data access.
+- Standard LRS is the cost-conscious dev choice. It stores three copies in one region but does not provide zone or cross-region resilience.
+- Hot tier favors the frequent reads/writes expected while building the platform. Azure charges for stored capacity, transactions, retrieval where applicable, and data transfer. HNS directory/ACL operations also generate transactions. The five empty filesystems have negligible capacity cost; costs begin as data and operations accumulate.
+- Versioning, soft delete, lifecycle rules, diagnostic destinations, and reserved capacity are intentionally deferred so this step does not create unreviewed retention or observability costs.
+
+## Review and validation
+
+Run from the repository root:
 
 ```bash
 az login
@@ -31,27 +58,10 @@ export TF_VAR_subscription_id="$(az account show --query id --output tsv)"
 terraform -chdir=terraform/environments/dev fmt -check -recursive
 terraform -chdir=terraform/environments/dev init
 terraform -chdir=terraform/environments/dev validate
-terraform -chdir=terraform/environments/dev plan -refresh=false -out=dev.tfplan
+terraform -chdir=terraform/environments/dev plan -out=dev.tfplan
 terraform -chdir=terraform/environments/dev show dev.tfplan
 ```
 
-Expected results:
+Review that the plan contains exactly one resource group, one storage account, and five private containers/filesystems. It must not contain bootstrap changes or any unrelated service. Do not run `apply` until the plan is approved.
 
-1. `init` reports that the `azurerm` backend was configured successfully and creates only local `.terraform/` metadata plus `.terraform.lock.hcl`.
-2. `validate` succeeds.
-3. The plan reports **no changes** because this root currently declares no resources.
-4. The `tfstate` container may remain empty until Terraform first writes state; do not run `apply` merely to create an empty state blob.
-
-To independently verify Entra-authorized access to the existing container without modifying it:
-
-```bash
-az storage blob list \
-  --account-name admmdevtfstatef6d99ba4 \
-  --container-name tfstate \
-  --auth-mode login \
-  --output table
-```
-
-The command may return an empty list before the main state is first written. An authorization error usually means the role assignment has not propagated yet or the active Azure CLI identity/subscription is not the one used by the bootstrap.
-
-Do not run `apply`, `destroy`, state migration, or any command from `terraform/bootstrap/` as part of this initialization. Review and commit the generated `.terraform.lock.hcl`; all other generated state, plans, local variable files, and `.terraform/` content remain ignored by Git.
+After a future approved deployment, the outputs can be inspected with `terraform -chdir=terraform/environments/dev output`. Generated state, plans, local variable files, and `.terraform/` content remain ignored by Git; `.terraform.lock.hcl` should remain committed.

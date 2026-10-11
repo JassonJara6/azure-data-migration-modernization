@@ -1,6 +1,6 @@
 # Dev platform Terraform root
 
-This directory is the Terraform root for the `admm` development platform in East US. It currently manages the platform resource group, an ADLS Gen2 account with five filesystem boundaries, and an empty Azure Data Factory with least-privilege access to Bronze. It does not create pipelines, datasets, linked services, triggers, integration runtimes, SHIR, Databricks, Key Vault, or networking resources.
+This directory is the Terraform root for the `admm` development platform in East US. It currently manages the platform resource group, an ADLS Gen2 account with five filesystem boundaries, an empty Azure Data Factory with least-privilege access to Bronze, and the Azure-side Self-hosted Integration Runtime (SHIR) resource. It does not create pipelines, datasets, linked services, triggers, Databricks, Key Vault, or networking resources.
 
 ## Remote backend and authentication
 
@@ -25,6 +25,7 @@ Terraform will manage:
 3. Five private containers—`bronze`, `silver`, `gold`, `quarantine`, and `audit`. In an HNS-enabled account, a blob container is an ADLS Gen2 filesystem. The configuration uses `azurerm_storage_container` with `storage_account_id`, which creates the filesystems through Azure Resource Manager without requiring temporary data-plane access for the deploying identity.
 4. One Azure Data Factory with a system-assigned managed identity.
 5. One `Storage Blob Data Contributor` role assignment for that identity, scoped to the existing `bronze` container only.
+6. One Self-hosted Integration Runtime named `shir-admm-dev` in the existing Data Factory.
 
 The storage name is `st` + `admm` + `dev` + `dl` + the first eight characters of an MD5 hash of the selected subscription ID, capped at 24 characters. This is deterministic, lowercase, compliant with Storage naming rules, and unlikely to collide globally. The subscription ID is used only to derive a stable non-secret suffix.
 
@@ -55,7 +56,22 @@ Data Factory uses a system-assigned managed identity, so Azure creates and rotat
 
 The deployment identity must be able to create role assignments at the Bronze scope, normally through `Owner`, `User Access Administrator`, or an equivalent custom role. `skip_service_principal_aad_check = true` avoids a transient lookup failure while the new managed identity replicates through Microsoft Entra ID; it does not broaden the assigned role or scope. RBAC propagation after deployment can still take several minutes.
 
-An empty Data Factory has no pipelines to execute, but future activity orchestration, data movement, integration-runtime usage, data-flow compute, and monitoring volume can incur charges. This step adds no billable pipeline runs, managed virtual network, or integration runtime. Review the current Azure Data Factory pricing before enabling workloads and use budgets/alerts for the dev subscription.
+An empty Data Factory has no pipelines to execute, but future activity orchestration, data movement through SHIR, data-flow compute, and monitoring volume can incur charges. This step adds no pipeline runs, Azure-hosted integration-runtime compute, or managed virtual network. Review the current Azure Data Factory pricing before enabling workloads and use budgets/alerts for the dev subscription.
+
+## Self-hosted Integration Runtime
+
+The Terraform resource creates only the **Azure-side registration** named `shir-admm-dev`. It does not install or configure the SHIR agent on Windows. The Windows service is the runtime that will open outbound connections to Azure Data Factory and connect locally to SQL Server.
+
+For local-to-Azure ingestion to work, the Windows host, Docker Desktop, the `adventureworks-sql` container, SQL Server on `127.0.0.1:1433`, and the SHIR Windows service must all be running. Because the agent and Docker-published SQL port are on the same Windows host, the future SQL linked service can reach that local endpoint through SHIR; no linked service is created in this increment.
+
+After an approved Terraform deployment, complete registration manually at a high level:
+
+1. In Azure Data Factory Studio, open **Manage → Integration runtimes** and select `shir-admm-dev`.
+2. Download the supported SHIR installer from the Azure-provided link and install it on the Windows machine hosting Docker and SQL Server.
+3. Retrieve one registration key interactively from the Azure portal and enter it directly into the Microsoft Integration Runtime Configuration Manager.
+4. Confirm the node reports **Running/Online** in both the Windows configuration manager and Data Factory Studio.
+
+Never paste a registration key into Terraform configuration, outputs, shell history, documentation, source control, logs, or issue screenshots. AzureRM 4.x exposes the primary and secondary keys as sensitive computed attributes of `azurerm_data_factory_integration_runtime_self_hosted`; under the explicitly approved approach, Terraform will therefore retain them in the access-controlled remote state even though this project never references or outputs them. Access to the state container must remain restricted.
 
 ## Review and validation
 
@@ -74,6 +90,6 @@ terraform -chdir=terraform/environments/dev plan -out=dev.tfplan
 terraform -chdir=terraform/environments/dev show dev.tfplan
 ```
 
-Because the resource group, data lake, and filesystems are already deployed, review that the plan adds exactly one Data Factory and one Bronze-scoped role assignment, with no changes to the existing resources. Confirm the role-assignment scope ends with `/blobServices/default/containers/bronze`; it must not equal the Storage Account or Resource Group ID. The plan must not contain bootstrap changes or any unrelated service. Do not run `apply` until the plan is approved.
+With the existing platform resources already deployed, review that the plan adds exactly one `azurerm_data_factory_integration_runtime_self_hosted` resource named `shir-admm-dev`, with no changes to the Data Factory, RBAC, Storage, containers, or other existing resources. The plan must not expose authentication-key values or contain bootstrap changes or unrelated services. Do not run `apply` until the plan is approved.
 
 After a future approved deployment, the outputs can be inspected with `terraform -chdir=terraform/environments/dev output`. Generated state, plans, local variable files, and `.terraform/` content remain ignored by Git; `.terraform.lock.hcl` should remain committed.

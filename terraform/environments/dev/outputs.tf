@@ -22,3 +22,8 @@ output "data_factory_principal_id" {
   description = "Principal ID of the Data Factory system-assigned managed identity."
   value       = azurerm_data_factory.platform.identity[0].principal_id
 }
+
+output "self_hosted_integration_runtime_name" {
+  description = "Name of the Azure-side Self-hosted Integration Runtime resource."
+  value       = azurerm_data_factory_integration_runtime_self_hosted.local_sql.name
+}

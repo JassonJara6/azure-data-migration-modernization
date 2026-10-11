@@ -59,3 +59,8 @@ resource "azurerm_role_assignment" "data_factory_bronze_contributor" {
   # skipping the directory lookup avoids transient Microsoft Entra replication failures.
   skip_service_principal_aad_check = true
 }
+
+resource "azurerm_data_factory_integration_runtime_self_hosted" "local_sql" {
+  name            = local.self_hosted_integration_runtime_name
+  data_factory_id = azurerm_data_factory.platform.id
+}

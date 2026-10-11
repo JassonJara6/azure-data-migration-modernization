@@ -50,7 +50,7 @@ resource "azurerm_data_factory" "platform" {
 }
 
 resource "azurerm_role_assignment" "data_factory_bronze_contributor" {
-  scope                = azurerm_storage_container.data_lake["bronze"].resource_manager_id
+  scope                = azurerm_storage_container.data_lake["bronze"].id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_data_factory.platform.identity[0].principal_id
   principal_type       = "ServicePrincipal"

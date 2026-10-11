@@ -51,7 +51,7 @@ The Data Factory name is `adf-admm-dev-` plus the same stable subscription-deriv
 
 ## Data Factory identity and Bronze access
 
-Data Factory uses a system-assigned managed identity, so Azure creates and rotates its credentials; no principal ID or credential is hardcoded. Terraform reads the generated principal ID directly from the factory and assigns `Storage Blob Data Contributor` at `azurerm_storage_container.data_lake["bronze"].resource_manager_id`. This is the Azure Resource Manager container ID supported by Azure RBAC—not the container's data-plane URL—and limits access to Bronze rather than the entire Storage Account or Resource Group.
+Data Factory uses a system-assigned managed identity, so Azure creates and rotates its credentials; no principal ID or credential is hardcoded. Terraform reads the generated principal ID directly from the factory and assigns `Storage Blob Data Contributor` at `azurerm_storage_container.data_lake["bronze"].id`. For the existing AzureRM v4 container resource, the plan confirms that this value is the Azure Resource Manager container ID—not a data-plane URL—and limits access to Bronze rather than the entire Storage Account or Resource Group.
 
 The deployment identity must be able to create role assignments at the Bronze scope, normally through `Owner`, `User Access Administrator`, or an equivalent custom role. `skip_service_principal_aad_check = true` avoids a transient lookup failure while the new managed identity replicates through Microsoft Entra ID; it does not broaden the assigned role or scope. RBAC propagation after deployment can still take several minutes.
 

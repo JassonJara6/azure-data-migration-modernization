@@ -72,7 +72,7 @@ resource "azurerm_key_vault" "platform" {
   tenant_id           = data.azurerm_client_config.current.tenant_id
   sku_name            = "standard"
 
-  enable_rbac_authorization     = true
+  rbac_authorization_enabled = true
   purge_protection_enabled      = true
   public_network_access_enabled = true
   soft_delete_retention_days    = 7

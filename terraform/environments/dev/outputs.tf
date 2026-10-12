@@ -27,3 +27,13 @@ output "self_hosted_integration_runtime_name" {
   description = "Name of the Azure-side Self-hosted Integration Runtime resource."
   value       = azurerm_data_factory_integration_runtime_self_hosted.local_sql.name
 }
+
+output "key_vault_name" {
+  description = "Name of the development Azure Key Vault."
+  value       = azurerm_key_vault.platform.name
+}
+
+output "key_vault_uri" {
+  description = "URI of the development Azure Key Vault."
+  value       = azurerm_key_vault.platform.vault_uri
+}

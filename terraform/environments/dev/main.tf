@@ -64,3 +64,27 @@ resource "azurerm_data_factory_integration_runtime_self_hosted" "local_sql" {
   name            = local.self_hosted_integration_runtime_name
   data_factory_id = azurerm_data_factory.platform.id
 }
+
+resource "azurerm_key_vault" "platform" {
+  name                = local.key_vault_name
+  location            = azurerm_resource_group.platform.location
+  resource_group_name = azurerm_resource_group.platform.name
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  sku_name            = "standard"
+
+  enable_rbac_authorization     = true
+  purge_protection_enabled      = true
+  public_network_access_enabled = true
+  soft_delete_retention_days    = 7
+
+  tags = local.common_tags
+}
+
+resource "azurerm_role_assignment" "data_factory_key_vault_secrets_user" {
+  scope                = azurerm_key_vault.platform.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_data_factory.platform.identity[0].principal_id
+  principal_type       = "ServicePrincipal"
+
+  skip_service_principal_aad_check = true
+}

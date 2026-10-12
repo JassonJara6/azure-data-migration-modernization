@@ -66,4 +66,4 @@ Empty phase directories contain `.gitkeep` files solely to make the planned boun
 - [ ] Phase 7: CI/CD and automated testing
 - [ ] Phase 8: documentation and portfolio presentation
 
-Phase 1 was completed after the restore and 11-table profile were validated locally. Phase 2 currently includes the [remote-state bootstrap](terraform/bootstrap/README.md), the ADLS Gen2 foundation, and an empty Azure Data Factory with Bronze-only managed-identity access, documented in the [dev Terraform root](terraform/environments/dev/README.md).
+Phase 1 was completed after the restore and 11-table profile were validated locally. Phase 2 currently includes the [remote-state bootstrap](terraform/bootstrap/README.md), ADLS Gen2, an empty Azure Data Factory with SHIR and Bronze-only access, and an RBAC-enabled Key Vault for future SQL secrets, documented in the [dev Terraform root](terraform/environments/dev/README.md).

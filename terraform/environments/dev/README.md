@@ -1,6 +1,6 @@
 # Dev platform Terraform root
 
-This directory is the Terraform root for the `admm` development platform in East US. It currently manages the platform resource group, an ADLS Gen2 account with five filesystem boundaries, an empty Azure Data Factory with least-privilege access to Bronze, and the Azure-side Self-hosted Integration Runtime (SHIR) resource. It does not create pipelines, datasets, linked services, triggers, Databricks, Key Vault, or networking resources.
+This directory is the Terraform root for the `admm` development platform in East US. It currently manages the platform resource group, an ADLS Gen2 account with five filesystem boundaries, an empty Azure Data Factory with least-privilege access to Bronze, the Azure-side Self-hosted Integration Runtime (SHIR), and a Key Vault for future SQL connection secrets. It does not create pipelines, datasets, linked services, triggers, Databricks, or networking resources.
 
 ## Remote backend and authentication
 
@@ -26,10 +26,14 @@ Terraform will manage:
 4. One Azure Data Factory with a system-assigned managed identity.
 5. One `Storage Blob Data Contributor` role assignment for that identity, scoped to the existing `bronze` container only.
 6. One Self-hosted Integration Runtime named `shir-admm-dev` in the existing Data Factory.
+7. One Standard-tier, RBAC-enabled Azure Key Vault with soft delete and purge protection.
+8. One `Key Vault Secrets User` role assignment for the Data Factory managed identity, scoped only to that vault.
 
 The storage name is `st` + `admm` + `dev` + `dl` + the first eight characters of an MD5 hash of the selected subscription ID, capped at 24 characters. This is deterministic, lowercase, compliant with Storage naming rules, and unlikely to collide globally. The subscription ID is used only to derive a stable non-secret suffix.
 
 The Data Factory name is `adf-admm-dev-` plus the same stable subscription-derived suffix. The suffix makes the globally scoped factory name deterministic without committing account-specific identifiers.
+
+The Key Vault name is `kv-admm-dev-` plus the same stable suffix. It is deterministic, globally unique in practice, and within the 24-character Key Vault name limit.
 
 ### Filesystem purposes
 
@@ -73,6 +77,16 @@ After an approved Terraform deployment, complete registration manually at a high
 
 Never paste a registration key into Terraform configuration, outputs, shell history, documentation, source control, logs, or issue screenshots. AzureRM 4.x exposes the primary and secondary keys as sensitive computed attributes of `azurerm_data_factory_integration_runtime_self_hosted`; under the explicitly approved approach, Terraform will therefore retain them in the access-controlled remote state even though this project never references or outputs them. Access to the state container must remain restricted.
 
+## Key Vault and SQL secrets
+
+The vault uses the current Azure tenant from `data.azurerm_client_config.current.tenant_id` and Azure RBAC rather than legacy access policies. Data Factory receives only `Key Vault Secrets User` on this vault, allowing its managed identity to read secret values without granting secret creation, deletion, role administration, or broader subscription access. No `azurerm_key_vault_secret` resource is declared, so SQL usernames, passwords, and connection strings do not pass through Terraform variables, plans, outputs, or state.
+
+When the SQL linked service is designed, create its secrets manually in the Azure portal/CLI or through an approved secure secret-management process. Use stable secret names, enter values interactively or through a protected CI secret, and never place values in `.tfvars`, shell history, documentation, logs, screenshots, or source control. The developer or automation identity performing this task needs a data-plane role such as `Key Vault Secrets Officer` on this vault; Azure subscription `Owner` or `Contributor` alone should not be assumed to grant secret data access under the RBAC model. Grant that operational role separately to the appropriate identity rather than widening Data Factory's read-only role.
+
+Public network access remains enabled so the current developer workstation and future Azure services can reach the vault without adding private endpoints in this increment. Authentication and authorization are still required. The Standard tier is the cost-conscious choice; charges are primarily operation-based and will begin as secrets are read or managed.
+
+Soft delete uses the minimum seven-day retention period, and purge protection is enabled. A Terraform destroy would soft-delete the vault but cannot purge it while retention applies; the protected name cannot be recreated during that period, and purge protection cannot be disabled after it is enabled. Treat vault destruction as an exceptional operation, and use a different deterministic suffix only if an intentionally deleted vault must be replaced before retention expires.
+
 ## Review and validation
 
 Run from the repository root:
@@ -90,6 +104,6 @@ terraform -chdir=terraform/environments/dev plan -out=dev.tfplan
 terraform -chdir=terraform/environments/dev show dev.tfplan
 ```
 
-With the existing platform resources already deployed, review that the plan adds exactly one `azurerm_data_factory_integration_runtime_self_hosted` resource named `shir-admm-dev`, with no changes to the Data Factory, RBAC, Storage, containers, or other existing resources. The plan must not expose authentication-key values or contain bootstrap changes or unrelated services. Do not run `apply` until the plan is approved.
+With the existing platform and SHIR already deployed, review that the plan adds exactly one `azurerm_key_vault` and one vault-scoped `azurerm_role_assignment`, with no changes to Data Factory, SHIR, Storage, containers, or existing Bronze RBAC. Confirm the role is `Key Vault Secrets User`, its principal is the existing Data Factory identity, and its scope is the new vault ID. The plan must contain no secret resources or values, bootstrap changes, or unrelated services. Do not run `apply` until the plan is approved.
 
 After a future approved deployment, the outputs can be inspected with `terraform -chdir=terraform/environments/dev output`. Generated state, plans, local variable files, and `.terraform/` content remain ignored by Git; `.terraform.lock.hcl` should remain committed.

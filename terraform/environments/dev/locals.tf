@@ -16,6 +16,10 @@ locals {
 
   self_hosted_integration_runtime_name = "shir-${var.name_prefix}-${var.environment}"
 
+  key_vault_name = lower(
+    "kv-${var.name_prefix}-${var.environment}-${substr(md5(data.azurerm_client_config.current.subscription_id), 0, 8)}"
+  )
+
   filesystem_names = toset([
     "audit",
     "bronze",

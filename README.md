@@ -2,7 +2,7 @@
 
 A production-style, portfolio-sized data platform that will move the AdventureWorks OLTP data through Azure Data Factory, ADLS Gen2, and Azure Databricks into a dimensional model.
 
-> **Current scope:** Phase 1 only—local source setup, source exploration, and Azure-readiness decisions. Azure resources and pipeline implementation intentionally have not been added yet.
+> **Current scope:** Phase 1 source setup is complete; Phase 2 Terraform infrastructure is implemented. Phase 3 now includes the SQL ingestion metadata foundation; dynamic ADF pipelines remain pending.
 
 ## Target architecture
 
@@ -14,7 +14,7 @@ Azure Data Factory ──► ADLS Gen2 / Bronze ──► Databricks / Silver �
                               raw                  validated              dimensional
 ```
 
-Secrets will be held in Azure Key Vault, Azure resources will be managed with Terraform, and GitHub Actions will provide CI/CD in later phases.
+Secrets will be held in Azure Key Vault. Azure resources are defined with Terraform; GitHub Actions CI/CD remains planned for a later phase.
 
 ## Phase 1 quick start
 
@@ -45,8 +45,9 @@ Stop the container without deleting its database volume with `make source-down`.
 ├── docker-compose.yml          # Reproducible local SQL Server
 ├── scripts/                    # Local automation
 ├── sql/source/                 # Restore and profiling SQL
+├── sql/metadata/               # Phase 3 control tables, seed, and validation
 ├── docs/                       # Architecture decisions and source notes
-├── terraform/                  # Reserved for Phase 2
+├── terraform/                  # Phase 2 bootstrap and dev infrastructure
 ├── adf/                        # Reserved for Phase 3
 ├── databricks/                 # Reserved for Phases 4–6
 ├── tests/                      # Automated tests added with each phase
@@ -58,8 +59,8 @@ Empty phase directories contain `.gitkeep` files solely to make the planned boun
 ## Delivery roadmap
 
 - [x] **Phase 1:** local source, exploration, and source contract
-- [ ] Phase 2: Azure infrastructure with Terraform
-- [ ] Phase 3: metadata-driven Bronze ingestion
+- [x] **Phase 2:** Azure infrastructure with Terraform (bootstrap and dev definitions)
+- [ ] **Phase 3:** metadata-driven Bronze ingestion ([metadata foundation implemented](docs/phase-3-ingestion-metadata.md); ADF pipelines pending)
 - [ ] Phase 4: Silver transformations and data quality
 - [ ] Phase 5: Gold dimensional model
 - [ ] Phase 6: observability, reconciliation, and error handling

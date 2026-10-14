@@ -51,7 +51,7 @@
         "typeProperties": {
           "source": {
             "type": "SqlServerSource",
-            "sqlReaderQuery": "USE [AdventureWorks]; SELECT config_id FROM ingestion.table_config WHERE is_active=1 ORDER BY config_id;",
+            "sqlReaderQuery": "SET NOCOUNT ON;\nIF DB_NAME()<>N'AdventureWorks'\n    THROW 51110, 'ls_sql_server must select AdventureWorks as its database.', 1;\nIF (SELECT COUNT_BIG(*) FROM ingestion.table_config WHERE is_active=1)>11\n    THROW 51112, 'At most eleven active source configurations are supported.', 1;\nSELECT TOP (12) config_id FROM ingestion.table_config WHERE is_active=1 ORDER BY config_id;",
             "queryTimeout": "00:15:00",
             "partitionOption": "None"
           },
@@ -67,11 +67,40 @@
         }
       },
       {
+        "name": "ValidateActiveConfigurations",
+        "type": "IfCondition",
+        "dependsOn": [
+          {
+            "activity": "ReadActiveConfigurations",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "typeProperties": {
+          "expression": {
+            "value": "@and(and(greaterOrEquals(length(activity('ReadActiveConfigurations').output.value),1),lessOrEquals(length(activity('ReadActiveConfigurations').output.value),11)),equals(int(activity('ReadActiveConfigurations').output.count),length(activity('ReadActiveConfigurations').output.value)))",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [],
+          "ifFalseActivities": [
+            {
+              "name": "InvalidConfigurationLookup",
+              "type": "Fail",
+              "typeProperties": {
+                "message": "Expected a complete Lookup array of one to eleven active configurations.",
+                "errorCode": "INVALID_CONFIGURATION_LOOKUP"
+              }
+            }
+          ]
+        }
+      },
+      {
         "name": "ForEachSource",
         "type": "ForEach",
         "dependsOn": [
           {
-            "activity": "ReadActiveConfigurations",
+            "activity": "ValidateActiveConfigurations",
             "dependencyConditions": [
               "Succeeded"
             ]
@@ -95,7 +124,7 @@
                 "waitOnCompletion": true,
                 "parameters": {
                   "config_id": {
-                    "value": "@item().config_id",
+                    "value": "@int(item().config_id)",
                     "type": "Expression"
                   },
                   "acknowledge_landing_only": {

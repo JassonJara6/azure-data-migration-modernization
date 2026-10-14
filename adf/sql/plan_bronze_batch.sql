@@ -1,8 +1,8 @@
 -- Read-only Lookup batch, not a deployment script or stored procedure.
 -- The generator injects only a typed ADF integer configuration ID.
 SET NOCOUNT ON;
-SET XACT_ABORT ON;
-USE [AdventureWorks];
+IF DB_NAME()<>N'AdventureWorks'
+    THROW 51110, 'ls_sql_server must select AdventureWorks as its database.', 1;
 DECLARE @config_id int = __CONFIG_ID__;
 DECLARE @schema sysname, @table sysname, @mode varchar(11), @pk nvarchar(400),
         @watermark sysname, @path nvarchar(400), @lower datetime2(7),
@@ -107,10 +107,15 @@ BEGIN
     EXEC sys.sp_executesql @sql,N'@u datetime2(7) OUTPUT,@a int OUTPUT,@b int OUTPUT',
          @u=@upper OUTPUT,@a=@u1 OUTPUT,@b=@u2 OUTPUT;
     DECLARE @ud nvarchar(100)=N'CONVERT(datetime2(7),N'''+CONVERT(nvarchar(33),@upper,126)+N''',126)';
-    DECLARE @uk nvarchar(600)=QUOTENAME(@k1)+N'<='+CONVERT(nvarchar(20),@u1);
-    IF @k2 IS NOT NULL SET @uk=N'('+QUOTENAME(@k1)+N'<'+CONVERT(nvarchar(20),@u1)
-        +N' OR ('+QUOTENAME(@k1)+N'='+CONVERT(nvarchar(20),@u1)+N' AND '
-        +QUOTENAME(@k2)+N'<='+CONVERT(nvarchar(20),@u2)+N'))';
+    -- Inclusive upper PK tuple: first component MUST be strict (<), with
+    -- equality permitted only when the second component is also <= its limit.
+    DECLARE @uk nvarchar(600);
+    IF @k2 IS NULL
+        SET @uk=QUOTENAME(@k1)+N'<='+CONVERT(nvarchar(20),@u1);
+    ELSE
+        SET @uk=N'('+QUOTENAME(@k1)+N'<'+CONVERT(nvarchar(20),@u1)
+            +N' OR ('+QUOTENAME(@k1)+N'='+CONVERT(nvarchar(20),@u1)+N' AND '
+            +QUOTENAME(@k2)+N'<='+CONVERT(nvarchar(20),@u2)+N'))';
     SET @where=@where+N' AND ('+@wm+N'<'+@ud+N' OR ('+@wm+N'='+@ud+N' AND '+@uk+N'))';
     SET @order=N'[ModifiedDate],'+@order;
 END;
@@ -137,7 +142,15 @@ DECLARE @upper_keys nvarchar(1000)=NULL;
 IF @mode='INCREMENTAL'
     SET @upper_keys=N'{"'+@k1+N'":'+CONVERT(nvarchar(20),@u1)
         +CASE WHEN @k2 IS NULL THEN N'' ELSE N',"'+@k2+N'":'+CONVERT(nvarchar(20),@u2) END+N'}';
-SELECT @config_id AS config_id, @schema AS source_schema, @table AS source_table,
+-- Copy receives a single SELECT, not a database-switching batch. Bound the
+-- query before Lookup serializes it; its JSON-escaped result stays far below
+-- Lookup's 4-MB limit even with worst-case Unicode escaping.
+DECLARE @extract_query nvarchar(max)=N'SELECT '+@columns+N' FROM '+@qualified
+    +N' WHERE '+@where+N' ORDER BY '+@order+N';';
+IF @extract_query IS NULL OR DATALENGTH(@extract_query)>65536
+    THROW 51111, 'Extraction query exceeds the 32768 UTF-16-unit plan budget.', 1;
+SELECT 1 AS plan_contract_version,
+       @config_id AS config_id, @schema AS source_schema, @table AS source_table,
        @mode AS load_type, @path AS bronze_relative_path,
        CONVERT(varchar(20),@expected) AS expected_rows,
        ISNULL(CONVERT(nvarchar(33),@lower,126),N'') AS watermark_lower,
@@ -145,5 +158,4 @@ SELECT @config_id AS config_id, @schema AS source_schema, @table AS source_table
        ISNULL(CONVERT(nvarchar(33),@upper,126),N'') AS watermark_upper,
        ISNULL(@upper_keys,N'') AS upper_key_json,
        ISNULL(@version,'') AS expected_row_version,
-       N'USE [AdventureWorks]; SELECT '+@columns+N' FROM '+@qualified
-          +N' WHERE '+@where+N' ORDER BY '+@order+N';' AS extract_query;
+       @extract_query AS extract_query;

@@ -2,7 +2,7 @@
 
 A production-style, portfolio-sized data platform that will move the AdventureWorks OLTP data through Azure Data Factory, ADLS Gen2, and Azure Databricks into a dimensional model.
 
-> **Current scope:** Phase 1 source setup is complete; Phase 2 Terraform infrastructure is implemented. Phase 3 now includes the SQL ingestion metadata foundation; dynamic ADF pipelines remain pending.
+> **Current scope:** Phase 1 source setup is complete; Phase 2 Terraform infrastructure is implemented. Phase 3 now includes the SQL ingestion metadata foundation; [dynamic ADF Bronze landing artifacts](docs/phase-3-adf-bronze.md) are implemented but unpublished, with watermark confirmation blocked.
 
 ## Target architecture
 
@@ -48,7 +48,7 @@ Stop the container without deleting its database volume with `make source-down`.
 ├── sql/metadata/               # Phase 3 control tables, seed, and validation
 ├── docs/                       # Architecture decisions and source notes
 ├── terraform/                  # Phase 2 bootstrap and dev infrastructure
-├── adf/                        # Reserved for Phase 3
+├── adf/                        # Phase 3 datasets, pipelines, and read-only SQL planner
 ├── databricks/                 # Reserved for Phases 4–6
 ├── tests/                      # Automated tests added with each phase
 └── .github/workflows/          # CI/CD added in Phase 7
@@ -60,7 +60,7 @@ Empty phase directories contain `.gitkeep` files solely to make the planned boun
 
 - [x] **Phase 1:** local source, exploration, and source contract
 - [x] **Phase 2:** Azure infrastructure with Terraform (bootstrap and dev definitions)
-- [ ] **Phase 3:** metadata-driven Bronze ingestion ([metadata foundation implemented](docs/phase-3-ingestion-metadata.md); ADF pipelines pending)
+- [ ] **Phase 3:** metadata-driven Bronze ingestion ([metadata foundation implemented](docs/phase-3-ingestion-metadata.md); [ADF landing prototype](docs/phase-3-adf-bronze.md) unpublished, safe confirmation pending)
 - [ ] Phase 4: Silver transformations and data quality
 - [ ] Phase 5: Gold dimensional model
 - [ ] Phase 6: observability, reconciliation, and error handling

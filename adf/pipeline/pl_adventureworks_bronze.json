@@ -1,0 +1,137 @@
+{
+  "name": "pl_adventureworks_bronze",
+  "properties": {
+    "description": "Landing-only prototype; intentional terminal failure prevents a committed-ingestion success signal.",
+    "concurrency": 1,
+    "parameters": {
+      "acknowledge_landing_only": {
+        "type": "Bool",
+        "defaultValue": false
+      }
+    },
+    "activities": [
+      {
+        "name": "AcknowledgeLandingOnly",
+        "type": "IfCondition",
+        "typeProperties": {
+          "expression": {
+            "value": "@pipeline().parameters.acknowledge_landing_only",
+            "type": "Expression"
+          },
+          "ifTrueActivities": [],
+          "ifFalseActivities": [
+            {
+              "name": "RequireAcknowledgement",
+              "type": "Fail",
+              "typeProperties": {
+                "message": "Landing only: no durable reconciliation, audit or watermark commit. Explicit acknowledgement required.",
+                "errorCode": "LANDING_ONLY_ACK_REQUIRED"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "ReadActiveConfigurations",
+        "type": "Lookup",
+        "dependsOn": [
+          {
+            "activity": "AcknowledgeLandingOnly",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:20:00",
+          "retry": 0,
+          "secureInput": true,
+          "secureOutput": true
+        },
+        "typeProperties": {
+          "source": {
+            "type": "SqlServerSource",
+            "sqlReaderQuery": "USE [AdventureWorks]; SELECT config_id FROM ingestion.table_config WHERE is_active=1 ORDER BY config_id;",
+            "queryTimeout": "00:15:00",
+            "partitionOption": "None"
+          },
+          "dataset": {
+            "referenceName": "ds_adventureworks_sql",
+            "type": "DatasetReference",
+            "parameters": {
+              "source_schema": "ingestion",
+              "source_table": "table_config"
+            }
+          },
+          "firstRowOnly": false
+        }
+      },
+      {
+        "name": "ForEachSource",
+        "type": "ForEach",
+        "dependsOn": [
+          {
+            "activity": "ReadActiveConfigurations",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "typeProperties": {
+          "items": {
+            "value": "@activity('ReadActiveConfigurations').output.value",
+            "type": "Expression"
+          },
+          "isSequential": true,
+          "activities": [
+            {
+              "name": "LandSource",
+              "type": "ExecutePipeline",
+              "typeProperties": {
+                "pipeline": {
+                  "referenceName": "pl_adventureworks_bronze_table",
+                  "type": "PipelineReference"
+                },
+                "waitOnCompletion": true,
+                "parameters": {
+                  "config_id": {
+                    "value": "@item().config_id",
+                    "type": "Expression"
+                  },
+                  "acknowledge_landing_only": {
+                    "value": "@pipeline().parameters.acknowledge_landing_only",
+                    "type": "Expression"
+                  },
+                  "ingestion_date": {
+                    "value": "@formatDateTime(pipeline().TriggerTime,'yyyy-MM-dd')",
+                    "type": "Expression"
+                  },
+                  "parent_run_id": {
+                    "value": "@pipeline().RunId",
+                    "type": "Expression"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "WatermarkConfirmationBlocked",
+        "type": "Fail",
+        "typeProperties": {
+          "message": "Landing finished, but ingestion is NOT committed. Independent destination reconciliation and durable audit/atomic watermark confirmation are not implemented. Do not promote these runs.",
+          "errorCode": "WATERMARK_CONFIRMATION_BLOCKED"
+        },
+        "dependsOn": [
+          {
+            "activity": "ForEachSource",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

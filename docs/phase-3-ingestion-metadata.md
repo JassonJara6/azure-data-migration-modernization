@@ -33,6 +33,8 @@ The seed is idempotent: it updates the approved configuration, inserts missing r
 
 ## Future ADF metadata contract
 
+The next increment implements [unpublished ADF landing artifacts](phase-3-adf-bronze.md). The success/confirmation path described below remains a requirement; the landing prototype cannot update watermarks.
+
 The future parent pipeline will read active `table_config` rows using `ls_sql_server`, then dispatch one child execution per table. It will use the already published linked services `ls_sql_server`, `ls_key_vault`, and `ls_adls_gen2`; their definitions and credentials are outside this increment.
 
 For INCREMENTAL sources, a pipeline must:

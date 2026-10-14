@@ -1,0 +1,29 @@
+{
+  "name": "ds_adventureworks_sql",
+  "properties": {
+    "linkedServiceName": {
+      "referenceName": "ls_sql_server",
+      "type": "LinkedServiceReference"
+    },
+    "parameters": {
+      "source_schema": {
+        "type": "String"
+      },
+      "source_table": {
+        "type": "String"
+      }
+    },
+    "type": "SqlServerTable",
+    "schema": [],
+    "typeProperties": {
+      "schema": {
+        "value": "@dataset().source_schema",
+        "type": "Expression"
+      },
+      "table": {
+        "value": "@dataset().source_table",
+        "type": "Expression"
+      }
+    }
+  }
+}

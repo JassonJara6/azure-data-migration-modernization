@@ -2,6 +2,8 @@
 
 Scope: **Bronze only** (Fase 2 in the current delivery request). Existing repository paths retain their historical `phase3` names. No Databricks, Silver, Gold, Terraform or Azure resource creation is included. The older landing-only runbook is background; this document governs reconciliation and confirmation.
 
+Para la ejecución ya realizada y el diagnóstico Windows/Git Bash, consulte [el cierre controlado](bronze-windows-closeout.md). La reconciliación real de R1 y la prueba R2 en Azure siguen pendientes de evidencia.
+
 ## Implemented flow
 
 1. Existing ADF parent performs Lookup / sequential ForEach for the active source configurations. Each child plans a fixed window, copies Parquet and checks source/read/copied counts.
@@ -17,8 +19,8 @@ Scope: **Bronze only** (Fase 2 in the current delivery request). Existing reposi
 ## What was verified locally
 
 - 20 offline ADF artifact/expression tests, including bound receipt parameters and FULL null values.
-- 32 real-Parquet and mocked SQL/ADF coordination tests, including bad metadata, wrong IDs/mode, count mismatch, duplicate/null PKs, out-of-window rows, absent upper tuple, 100-ns timestamps, empty windows, changed ETags and parent rejection/idempotency.
-- 14 tests on **SQL Server 2022 Developer in a disposable isolated Docker container**: procedure deployment/redeployment, exact/conflicting retries, two complete consecutive parents, empty increments, FULL, composite keys, stale-version rollback, malformed evidence, least privilege and a trusted EXECUTE-only parent call.
+- 61 real-Parquet, safe-diagnostic, connection and mocked SQL/ADF coordination tests, including bad metadata, wrong IDs/mode, count mismatch, duplicate/null PKs, out-of-window rows, absent upper tuple, 100-ns timestamps, empty windows, changed ETags and parent rejection/idempotency.
+- 18 tests on **SQL Server 2022 Developer in a disposable isolated Docker container**: procedure deployment/redeployment, exact/conflicting retries, two complete consecutive parents, empty increments, FULL, composite keys, stale-version rollback, malformed evidence, least privilege and a trusted EXECUTE-only parent call. Real pyodbc/ODBC Driver 18 tests additionally verify special-character password authentication, safe login failures, bound manifest attestation, database selection, deferred SQL errors and atomic parent replay.
 - The real SQL planner was executed against synthetic source tables. Its thirteen-column single-row result, hexadecimal rowversion and generated Copy SELECT were verified. Copy projects incremental ModifiedDate as datetime2(7), matching the boundary conversion even when the source uses SQL datetime. Rows inserted after planning above the complete upper tuple were excluded.
 
 These are synthetic/local tests, **not** evidence of an Azure/ADLS end-to-end run or a test against the user's AdventureWorks instance. No Azure changes or merge were performed. The confirmation block remains until the manual acceptance below is approved and passed. A successful external SQL receipt does not retroactively change ADF's deliberately Failed status.

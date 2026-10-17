@@ -14,6 +14,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tools'))
 import reconcile_bronze as recon
 import commit_reconciled_bronze as worker
 import commit_bronze_parent as parent
+from bronze_diagnostics import BronzeFailure
 
 CHILD='00000000-0000-0000-0000-000000000001'
 PARENT='10000000-0000-0000-0000-000000000001'
@@ -131,7 +132,7 @@ def test_one_bad_child_cannot_commit_parent(monkeypatch):
         if args[-1]==store.runs[-1]['child_run_id']:raise ValueError('bad Parquet')
         return {}
     monkeypatch.setattr(parent,'attest_run',attest)
-    with pytest.raises(ValueError):parent.commit_parent(store,None,'storage123','bronze',PARENT,lambda *a:None)
+    with pytest.raises(BronzeFailure):parent.commit_parent(store,None,'storage123','bronze',PARENT,lambda *a:None)
     assert store.commits==0
 
 
@@ -142,7 +143,7 @@ def test_incomplete_parent_blocks_before_adls(monkeypatch,failure):
     if failure=='duplicate':store.runs[-1]['config_id']=1
     if failure=='mode':store.configs[-1]['load_type']='INCREMENTAL'
     monkeypatch.setattr(parent,'attest_run',lambda *a:pytest.fail('must not read ADLS'))
-    with pytest.raises(ValueError):parent.commit_parent(store,None,'storage123','bronze',PARENT,lambda *a:None)
+    with pytest.raises(BronzeFailure):parent.commit_parent(store,None,'storage123','bronze',PARENT,lambda *a:None)
 
 
 def test_adf_failure_or_child_mismatch_rejected():

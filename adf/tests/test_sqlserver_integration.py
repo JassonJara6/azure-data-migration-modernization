@@ -5,9 +5,11 @@ AdventureWorks in that disposable container contains only metadata test objects.
 """
 import os
 import subprocess
+import sys
 from pathlib import Path
 import pytest
 ROOT=Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(ROOT/'adf/tools'))
 CONTAINER=os.environ.get('BRONZE_SQL_TEST_CONTAINER','')
 pytestmark=pytest.mark.skipif(not CONTAINER,reason='Requires isolated SQL Server test container')
 
@@ -267,3 +269,69 @@ INSERT @rows EXEC sys.sp_executesql @query;
 IF (SELECT CONVERT(nvarchar(33),ModifiedDate,126) FROM @rows)<>(SELECT watermark_upper FROM @plan)
  THROW 52031,'Copy timestamp lost boundary precision.',1;
 """)
+
+
+def odbc_connection(*,password=None):
+    import sys
+    sys.path.insert(0,str(ROOT/'adf/tools'))
+    import pyodbc
+    from bronze_connection import build_connection,odbc_value
+    value=build_connection(os.environ['BRONZE_SQL_TEST_SERVER'],'sa',
+        os.environ['BRONZE_SQL_TEST_PASSWORD'] if password is None else password,
+        trust_local_certificate=True)
+    value=value.replace('DRIVER={ODBC Driver 18 for SQL Server}',
+        'DRIVER='+odbc_value(os.environ['BRONZE_SQL_TEST_DRIVER']))
+    return pyodbc.connect(value,autocommit=True,timeout=5)
+
+
+def test_real_odbc_special_password_and_database():
+    from commit_reconciled_bronze import SqlStore
+    with odbc_connection() as conn:
+        SqlStore(conn).validate_session()
+        assert SqlStore(conn).rows('SELECT 1 AS ready')==[{'ready':1}]
+
+
+def test_real_odbc_login_failure_has_safe_actionable_diagnostic():
+    import pyodbc
+    from bronze_diagnostics import report_error
+    with pytest.raises(pyodbc.Error) as caught:odbc_connection(password='Wrong!;}$secret')
+    report=report_error(caught.value,'sql_connect')
+    assert report['code']=='SQL_LOGIN_FAILED' and report['sqlstate']=='28000'
+    assert os.environ['BRONZE_SQL_TEST_PASSWORD'] not in str(report)
+    assert 'Wrong!' not in str(report)
+
+
+def test_real_odbc_deferred_error_and_atomic_parent_replay():
+    from commit_reconciled_bronze import SqlStore
+    from bronze_diagnostics import BronzeFailure
+    sql(receipts(P1))
+    with odbc_connection() as conn:
+        store=SqlStore(conn)
+        with pytest.raises(BronzeFailure) as caught:
+            store.execute("SET NOCOUNT ON; SELECT 1 AS acknowledgement; THROW 51699,'Private row data',1;",stage='sql_commit_parent')
+        assert caught.value.report['sql_native_code']==51699
+        assert caught.value.report['parent_commit_outcome']=='UNKNOWN'
+        store.commit_parent(P1)
+        receipt=store.parent_receipt(P1)
+        assert receipt['committed_children']==11
+        before=store.rows('SELECT * FROM ingestion.watermark_state ORDER BY config_id')
+        store.commit_parent(P1)
+        assert store.parent_receipt(P1)==receipt
+        assert store.rows('SELECT * FROM ingestion.watermark_state ORDER BY config_id')==before
+
+
+def test_real_odbc_bound_manifest_attestation_and_wrong_database():
+    import json
+    from commit_reconciled_bronze import SqlStore
+    from bronze_diagnostics import BronzeFailure
+    sql(receipts(P1))
+    with odbc_connection() as conn:
+        store=SqlStore(conn)
+        for run in store.parent_runs(P1):
+            plan=store.get_run(run['child_run_id'])
+            evidence=json.loads(plan['manifest_json'])
+            store.attest(plan,evidence,plan['manifest_json'],plan['manifest_sha256'])
+            assert store.get_run(run['child_run_id'])['status']=='RECONCILED'
+        conn.execute('USE master')
+        with pytest.raises(BronzeFailure) as caught:store.validate_session()
+        assert caught.value.report['code']=='SQL_WRONG_DATABASE'

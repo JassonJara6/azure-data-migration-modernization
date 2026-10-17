@@ -165,6 +165,7 @@ def main():
             evidence,_,_=read_and_reconcile(service.get_file_system_client(args.filesystem),plan,args.account,args.filesystem)
         print(json.dumps(evidence,sort_keys=True));return 0
     except Exception as exc:
-        print(json.dumps({'status':'RECONCILIATION_FAILED','error_type':type(exc).__name__}),file=sys.stderr);return 1
+        from bronze_diagnostics import report_error
+        print(json.dumps(report_error(exc,'adls_reconcile_child'),ensure_ascii=True),file=sys.stderr);return 1
 
 if __name__=='__main__':sys.exit(main())

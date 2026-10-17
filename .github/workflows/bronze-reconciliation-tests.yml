@@ -28,6 +28,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: python -m pip install pytest
+      - run: python -m pip install pytest pyodbc
       - name: Test real stored procedures in a disposable SQL Server (no Azure)
         run: python adf/tests/run_sql_integration.py

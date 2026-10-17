@@ -37,6 +37,9 @@ def main():
         subprocess.run(['docker','cp',name+':/opt/microsoft/msodbcsql18',temp.name],check=True)
         drivers=list(Path(temp.name).glob('msodbcsql18/lib64/libmsodbcsql-*.so*'))
         if len(drivers)!=1:raise RuntimeError('ODBC test driver not found')
+        dependencies=subprocess.run(['ldd',str(drivers[0])],capture_output=True,text=True,check=True)
+        if 'not found' in dependencies.stdout:
+            raise RuntimeError('Isolated ODBC driver has missing native dependencies: '+dependencies.stdout)
         port=subprocess.check_output(['docker','port',name,'1433/tcp'],text=True).strip().rsplit(':',1)[1]
         root=Path(__file__).resolve().parents[2]
         result=subprocess.run([sys.executable,'-m','pytest','-q','adf/tests/test_sqlserver_integration.py'],cwd=root,

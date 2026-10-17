@@ -19,7 +19,7 @@ SECRET="sensitive;PWD={a}}b};token=private"
  ('42000',229,'SQL_PERMISSION_DENIED'),('42000',2812,'SQL_CONTRACT_MISMATCH'),
  ('42000',51601,'SQL_GUARD_REJECTED'),('08001',10061,'SQL_CONNECTION_FAILED'),
  ('HYT00',0,'SQL_TIMEOUT'),('40001',1205,'SQL_DEADLOCK'),
- ('IM002',0,'ODBC_DRIVER_UNAVAILABLE'),('HY104',0,'SQL_PARAMETER_BINDING_FAILED')])
+ ('IM002',0,'ODBC_DRIVER_UNAVAILABLE'),('01000',0,'SQL_OPERATION_FAILED'),('HY104',0,'SQL_PARAMETER_BINDING_FAILED')])
 def test_allowlisted_sql_diagnostics(state,native,expected):
     error=Exception(state,f'{SECRET} [{state}] ({native}) SQL and row data')
     report=report_error(error,'sql_attest_child')
@@ -172,3 +172,8 @@ def test_cli_historical_receipt_needs_no_azure_context_or_read(monkeypatch,capsy
     assert parent.main()==0
     captured=capsys.readouterr()
     assert json.loads(captured.out)['replayed'] is True and not captured.err
+
+
+def test_missing_linux_driver_dependency_is_diagnosed_safely():
+    report=report_error(Exception('01000',"[unixODBC]Can't open lib "+SECRET),'sql_connect')
+    assert report['code']=='ODBC_DRIVER_UNAVAILABLE' and SECRET not in json.dumps(report)

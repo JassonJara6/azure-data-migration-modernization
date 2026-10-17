@@ -19,7 +19,7 @@ Para la ejecución ya realizada y el diagnóstico Windows/Git Bash, consulte [el
 ## What was verified locally
 
 - 20 offline ADF artifact/expression tests, including bound receipt parameters and FULL null values.
-- 61 real-Parquet, safe-diagnostic, connection and mocked SQL/ADF coordination tests, including bad metadata, wrong IDs/mode, count mismatch, duplicate/null PKs, out-of-window rows, absent upper tuple, 100-ns timestamps, empty windows, changed ETags and parent rejection/idempotency.
+- 63 real-Parquet, safe-diagnostic, connection and mocked SQL/ADF coordination tests, including bad metadata, wrong IDs/mode, count mismatch, duplicate/null PKs, out-of-window rows, absent upper tuple, 100-ns timestamps, empty windows, changed ETags and parent rejection/idempotency.
 - 18 tests on **SQL Server 2022 Developer in a disposable isolated Docker container**: procedure deployment/redeployment, exact/conflicting retries, two complete consecutive parents, empty increments, FULL, composite keys, stale-version rollback, malformed evidence, least privilege and a trusted EXECUTE-only parent call. Real pyodbc/ODBC Driver 18 tests additionally verify special-character password authentication, safe login failures, bound manifest attestation, database selection, deferred SQL errors and atomic parent replay.
 - The real SQL planner was executed against synthetic source tables. Its thirteen-column single-row result, hexadecimal rowversion and generated Copy SELECT were verified. Copy projects incremental ModifiedDate as datetime2(7), matching the boundary conversion even when the source uses SQL datetime. Rows inserted after planning above the complete upper tuple were excluded.
 

@@ -7,7 +7,7 @@ from contextlib import contextmanager
 import re
 
 SQL_CODES={18456,4060,229,208,2812,207,201,8144,1205,1222,2601,2627,10054,10060,10061,11001}
-STATES={'08001','08004','08007','08S01','28000','42000','42S02','42S22','HYT00','HYT01','HY000','HY104','IM002','IM003','40001','23000'}
+STATES={'08001','08004','08007','08S01','28000','42000','42S02','42S22','HYT00','HYT01','HY000','HY104','IM002','IM003','01000','40001','23000'}
 
 
 # Exact, versioned messages only. Never echo an arbitrary ValueError/Arrow/JSON
@@ -86,9 +86,9 @@ def report_error(exc,stage='startup'):
     elif native and 51200<=native<=51699:
         describe('SQL_GUARD_REJECTED','Un procedimiento rechazó la confirmación o evidencia.',
           'Consulta el número SQL en los procedimientos versionados. Conserva los archivos y el mismo parent; no fuerces el avance del cursor.')
-    elif state in ('IM002','IM003'):
+    elif state in ('IM002','IM003') or (state=='01000' and any(word in lower for word in ("can't open lib",'cannot open shared object','could not be loaded'))):
         describe('ODBC_DRIVER_UNAVAILABLE','No se pudo cargar el driver ODBC solicitado.',
-          'Comprueba ODBC Driver 18 y que Python y el driver tengan la misma arquitectura.')
+          'Comprueba ODBC Driver 18, sus dependencias nativas y que Python y el driver tengan la misma arquitectura.')
     elif state=='HY104':
         describe('SQL_PARAMETER_BINDING_FAILED','El driver rechazó la precisión o el tipo de un parámetro.',
           'Comprueba la versión pyodbc/ODBC y la firma SQL; la etapa identifica si falló la atestación o confirmación.')

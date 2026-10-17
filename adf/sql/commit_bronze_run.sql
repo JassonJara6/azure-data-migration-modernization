@@ -107,6 +107,10 @@ BEGIN
             IF @expected=0 AND
                (@upper<>@lower OR @u1<>@l1 OR @u2<>@l2)
                 THROW 51221, 'Empty incremental batch cannot advance cursor.', 1;
+            -- Nonempty batches must advance their bounded cursor; otherwise
+            -- a malformed audit row could falsely confirm skipped rows.
+            IF @expected>0 AND @upper=@lower AND @u1=@l1 AND @u2=@l2
+                THROW 51225, 'Nonempty incremental batch has no cursor progress.', 1;
 
             UPDATE ingestion.watermark_state
             SET watermark_value=@upper,

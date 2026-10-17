@@ -1,0 +1,29 @@
+name: Bronze reconciliation tests
+on:
+  pull_request:
+    paths:
+      - "adf/tools/**"
+      - "adf/tests/**"
+      - ".github/workflows/bronze-reconciliation-tests.yml"
+  push:
+    branches: ["feature/bronze-audit-reconciliation-commit"]
+    paths:
+      - "adf/tools/**"
+      - "adf/tests/**"
+      - ".github/workflows/bronze-reconciliation-tests.yml"
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install pytest pyarrow
+      - name: Run Bronze reconciliation unit tests
+        run: python -m pytest -q adf/tests/test_reconcile_bronze.py
+      - name: Compile Python sources
+        run: python -m compileall -q adf/tools adf/tests

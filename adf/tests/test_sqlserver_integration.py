@@ -248,3 +248,22 @@ EXEC ingestion.commit_bronze_parent N'{P1}';
 REVERT;
 IF (SELECT COUNT(*) FROM ingestion.bronze_run_audit WHERE status='COMMITTED')<>11 THROW 52029,'Ownership-chain commit failed.',1;
 """)
+
+
+def test_sql_datetime_watermark_projection_matches_boundary_precision():
+    sql("""
+IF SCHEMA_ID('Production') IS NULL EXEC('CREATE SCHEMA Production');
+DROP TABLE IF EXISTS Production.Product;
+CREATE TABLE Production.Product(ProductID int NOT NULL PRIMARY KEY,ModifiedDate datetime NOT NULL);
+INSERT Production.Product VALUES(1,'2026-10-17T12:00:00.003');
+GO
+"""+capture_plan(5)+"""
+DECLARE @query nvarchar(max)=(SELECT extract_query FROM @plan);
+IF NOT EXISTS(SELECT 1 FROM sys.dm_exec_describe_first_result_set(@query,NULL,0)
+ WHERE name='ModifiedDate' AND system_type_name='datetime2(7)')
+ THROW 52030,'Copy watermark type differs from boundary normalization.',1;
+DECLARE @rows table(ProductID int,ModifiedDate datetime2(7));
+INSERT @rows EXEC sys.sp_executesql @query;
+IF (SELECT CONVERT(nvarchar(33),ModifiedDate,126) FROM @rows)<>(SELECT watermark_upper FROM @plan)
+ THROW 52031,'Copy timestamp lost boundary precision.',1;
+""")

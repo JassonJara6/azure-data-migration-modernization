@@ -74,7 +74,10 @@ def reconcile(files, expected_rows, run_id, plan=None):
         if required-set(schema.names): raise ValueError('Missing source/ingestion columns')
         schemas.add(str(schema.remove_metadata())); file_rows=0
         for batch in parquet.iter_batches(batch_size=65536):
-            rows=batch.to_pylist()
+            # Do not materialize arbitrary source timestamps as Python datetime:
+            # nanoseconds would require pandas or lose precision. Only metadata
+            # and PKs become Python values; ModifiedDate is inspected as Arrow.
+            rows=batch.select(sorted(REQUIRED_METADATA|set(keys))).to_pylist()
             for index,row in enumerate(rows):
                 if row['_pipeline_run_id']!=run_id or row['_source_system']!='adventureworks': raise ValueError('Run/source mismatch')
                 ticks(row['_ingested_at_utc'])
@@ -93,7 +96,7 @@ def reconcile(files, expected_rows, run_id, plan=None):
                             ns=scalar.cast(pa.timestamp('ns')).cast(pa.int64()).as_py()
                             if ns%100: raise ValueError('Sub-datetime2 precision')
                             date_ticks=ns//100
-                        elif scalar.is_valid: date_ticks=ticks(row['ModifiedDate'])
+                        elif scalar.is_valid: date_ticks=ticks(scalar.as_py())
                         else: raise ValueError('Null source watermark')
                         value=(date_ticks,*pk)
                         if not lower<value<=upper: raise ValueError('Destination row outside bounded cursor')

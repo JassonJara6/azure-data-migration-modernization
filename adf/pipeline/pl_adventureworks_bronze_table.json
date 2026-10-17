@@ -293,6 +293,39 @@
             }
           ]
         }
+      },
+      {
+        "name": "RegisterCopyAudit",
+        "type": "Script",
+        "dependsOn": [
+          {
+            "activity": "CheckCopyCounters",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ],
+        "policy": {
+          "timeout": "0.00:10:00",
+          "retry": 0,
+          "secureInput": true,
+          "secureOutput": true
+        },
+        "linkedServiceName": {
+          "referenceName": "ls_sql_server",
+          "type": "LinkedServiceReference"
+        },
+        "typeProperties": {
+          "scripts": [
+            {
+              "type": "NonQuery",
+              "text": {
+                "type": "Expression",
+                "value": "@concat('EXEC ingestion.register_bronze_copy @config_id=',string(int(pipeline().parameters.config_id)),', @parent_run_id=N''',pipeline().parameters.parent_run_id,''', @child_run_id=N''',pipeline().RunId,''', @bronze_path=N''',activity('PlanBatch').output.firstRow.bronze_relative_path,'/load_type=',toLower(activity('PlanBatch').output.firstRow.load_type),'/ingestion_date=',pipeline().parameters.ingestion_date,'/run_id=',pipeline().RunId,''', @load_type=''',activity('PlanBatch').output.firstRow.load_type,''', @expected_rows=',activity('PlanBatch').output.firstRow.expected_rows,', @copied_rows=',string(activity('CopyToBronze').output.rowsCopied),', @watermark_lower=',if(equals(activity('PlanBatch').output.firstRow.load_type,'FULL'),'NULL',concat('CONVERT(datetime2(7),N''',activity('PlanBatch').output.firstRow.watermark_lower,''',126)')),', @watermark_lower_key_json=',if(equals(activity('PlanBatch').output.firstRow.load_type,'FULL'),'NULL',concat('N''',activity('PlanBatch').output.firstRow.lower_key_json,'''')),', @watermark_upper=',if(equals(activity('PlanBatch').output.firstRow.load_type,'FULL'),'NULL',concat('CONVERT(datetime2(7),N''',activity('PlanBatch').output.firstRow.watermark_upper,''',126)')),', @watermark_upper_key_json=',if(equals(activity('PlanBatch').output.firstRow.load_type,'FULL'),'NULL',concat('N''',activity('PlanBatch').output.firstRow.upper_key_json,'''')),', @expected_row_version=',if(equals(activity('PlanBatch').output.firstRow.load_type,'FULL'),'NULL',activity('PlanBatch').output.firstRow.expected_row_version),';')"
+              }
+            }
+          ]
+        }
       }
     ]
   }

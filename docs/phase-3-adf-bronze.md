@@ -1,5 +1,7 @@
 # Phase 3: dynamic ADF Bronze landing (unpublished prototype)
 
+> For the current Bronze audit/reconciliation/parent-confirmation implementation and deployment/R1-R2 checklist, use [the controlled rollout runbook](../adf/docs/bronze-end-to-end-rollout.md). This original document describes the landing foundation; ADF’s confirmation block is still retained.
+
 This increment supplies ADF authoring JSON for all 11 approved AdventureWorks sources: five INCREMENTAL and six FULL. It reuses `ls_sql_server` and `ls_adls_gen2`; the existing SQL linked service continues to use its published Key Vault configuration (`ls_key_vault`). No linked service, SHIR, credential, trigger, Azure resource, metadata table, or permission is created or changed here.
 
 **Status: landing only, NOT committed ingestion.** No artifact updates `ingestion.watermark_state`. The parent deliberately ends in `WATERMARK_CONFIRMATION_BLOCKED` after successful table copies. Destination reconciliation, durable audit and atomic confirmation are not implemented. Do not promote these directories to Silver or treat the run as production success. This is an explicit safety boundary, not a transient error to suppress.

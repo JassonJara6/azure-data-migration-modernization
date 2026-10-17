@@ -1,33 +1,20 @@
-# Bronze deployment checklist (not yet authorized)
+# Bronze release checklist
 
-The code in PR #17 is a development draft, **not a deployable complete
-solution**. Never remove the published ADF fail gate yet.
+Use [the rollout runbook](bronze-end-to-end-rollout.md) for exact commands and two-run acceptance.
 
-## Preconditions
-- CI reconciliation unit tests pass; validate SQL DDL and procedure on a
-  disposable AdventureWorks database, including rollback and concurrency.
-- Confirm the live `ingestion.watermark_state` column names, rowversion type,
-  foreign keys and constraints before executing migrations.
-- Implement a restricted trusted evidence writer that performs destination
-  reconciliation itself; a caller must not be able to forge RECONCILED status.
-- Persist audit PLANNED -> COPIED -> RECONCILED before commit, with unique
-  run identity, exact Bronze path, plan cursor and Copy metrics.
-- Protect audit rows against post-commit edits; configure least privilege.
-- Wire ADF to the reconciler and SQL commit with retry/failed-run handling.
-- Test empty-batch semantics and immutable Bronze destination path.
-- Confirm no source changes escape the bounded extraction snapshot contract.
+- [ ] Review the Bronze-only PR diff; no Databricks/Silver/Gold/Terraform changes.
+- [ ] Verify existing metadata and capture/back up live cursor/audit state; do not reset cursors.
+- [ ] Review additive audit migration and any legacy duplicates/incomplete receipts.
+- [ ] Obtain approval before deployment, Azure execution/publishing or merge.
+- [ ] Deploy preflight, audit schema, registration, attestation, child commit and parent commit in documented order.
+- [ ] Apply separate least-privilege ADF/trusted-runtime grants; test denied direct writes/attestation from ADF.
+- [ ] Install the trusted Python/ODBC dependencies and bind the existing factory/storage settings securely.
+- [ ] Validate All in ADF, including parameterized Stored Procedure calls and FULL null values; reuse existing linked services/SHIR.
+- [ ] Keep WATERMARK_CONFIRMATION_BLOCKED and acknowledgement gates active.
+- [ ] Approve and execute R1: eleven copied, eleven independently reconciled, one atomic committed parent.
+- [ ] Retry R1 confirmation: unchanged watermark bytes/versions and durable replay receipt.
+- [ ] Execute R2 against unchanged source: five empty incrementals, six FULL, no cursor movement, eleven new receipts.
+- [ ] Verify failure/rollback, stale-version rejection and independent landed-file evidence.
+- [ ] Retain evidence and obtain approval for any subsequent replacement of ADF's confirmation block.
 
-## Deployment order
-1. Review and run audit DDL in AdventureWorks.
-2. Deploy tested SQL commit procedure with no broad public execute grants.
-3. Provision trusted reconciliation compute/identity and audit permissions.
-4. Deploy revised child and parent pipelines in ADF Studio.
-5. Run a single controlled FULL and INCREMENTAL test, including forced failures.
-6. Check independent Parquet counts, audit rows and exact cursor advancement.
-7. Only after all checks pass, remove intentional terminal failure and run all
-   eleven tables again.
-
-## Current published state
-Landing-only ADF pipelines have copied all 11 tables, but watermarks remain
-uncommitted. These earlier runs cannot be retroactively promoted based solely
-on Copy activity success.
+Local verification in this task includes real Parquet tests, mocked ADF coordination and isolated SQL Server integration. It does not establish the live deployment or R1/R2 acceptance in Azure.

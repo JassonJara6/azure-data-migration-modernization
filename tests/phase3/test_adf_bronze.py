@@ -144,7 +144,7 @@ class ArtifactTests(unittest.TestCase):
         self.assertEqual(block['typeProperties']['errorCode'], 'WATERMARK_CONFIRMATION_BLOCKED')
         self.assertEqual(block['dependsOn'][0]['activity'], 'ForEachSource')
         types = {n.get('type') for n in walk(ARTIFACTS)}
-        self.assertFalse(types & {'Script', 'SqlServerStoredProcedure', 'WebActivity', 'Delete'})
+        self.assertFalse(types & {'Script', 'WebActivity', 'Delete'})
         code = re.sub(r"--[^\n]*|'(?:''|[^'])*'", '', SQL)
         self.assertIsNone(re.search(r'\b(UPDATE|DELETE|MERGE|TRUNCATE|DROP|GRANT|CREATE|ALTER)\b', code, re.I))
         self.assertNotRegex(code, r'INSERT\s+ingestion\.')
@@ -230,7 +230,8 @@ class LookupAndControlTests(unittest.TestCase):
             for node in walk(artifact):
                 if node.get('type') == 'Expression':
                     result = evaluate(node, context)
-                    self.assertIsNotNone(result)
+                    if not node['value'].startswith('@if('):
+                        self.assertIsNotNone(result)
                     for parameter in re.findall(r'pipeline\(\).parameters.([A-Za-z_]+)', node['value']):
                         self.assertIn(parameter, properties['parameters'])
         execute = activity(PARENT, 'ForEachSource')['typeProperties']['activities'][0]['typeProperties']
@@ -270,7 +271,7 @@ class LookupAndControlTests(unittest.TestCase):
         self.assertIn(')>11', query)
         self.assertFalse(activity(PARENT, 'ReadActiveConfigurations')['typeProperties']['firstRowOnly'])
         self.assertTrue(activity(CHILD, 'PlanBatch')['typeProperties']['firstRowOnly'])
-        self.assertIn("CONVERT(varchar(18),s.row_version,1)", SQL)
+        self.assertIn("CONVERT(varchar(18),CONVERT(binary(8),s.row_version),1)", SQL)
 
     def test_database_guard_and_copy_single_select(self):
         parent_query = activity(PARENT, 'ReadActiveConfigurations')['typeProperties']['source']['sqlReaderQuery']
@@ -319,6 +320,28 @@ class LookupAndControlTests(unittest.TestCase):
         output['count'], output['value'] = '12', [{'config_id': 1}]
         self.assertEqual(condition_status(gate, context), 'Failed')
         self.assertEqual(activity(PARENT, 'ForEachSource')['dependsOn'], BUILD.after('ValidateActiveConfigurations'))
+
+    def test_registration_is_bound_and_full_cursor_parameters_are_null(self):
+        register = activity(CHILD, 'RegisterCopyAudit')
+        self.assertEqual(register['type'], 'SqlServerStoredProcedure')
+        self.assertEqual(register['dependsOn'], BUILD.after('CheckCopyCounters'))
+        self.assertEqual(register['typeProperties']['storedProcedureName'], 'ingestion.register_bronze_copy')
+        self.assertEqual(register['policy']['retry'], 2)
+        self.assertTrue(register['policy']['secureInput'])
+        self.assertNotIn('scripts', register['typeProperties'])
+        parameters = register['typeProperties']['storedProcedureParameters']
+        self.assertEqual(set(parameters), {'config_id','parent_run_id','child_run_id','bronze_path','load_type',
+            'expected_rows','copied_rows','watermark_lower','watermark_lower_key_json','watermark_upper',
+            'watermark_upper_key_json','expected_row_version'})
+        context = sample_context()
+        self.assertIs(type(evaluate(parameters['config_id']['value'], context)), int)
+        for mode in ['INCREMENTAL', 'FULL']:
+            context['activities']['PlanBatch']['output']['firstRow']['load_type'] = mode
+            for name in ['watermark_lower','watermark_upper','watermark_lower_key_json','watermark_upper_key_json','expected_row_version']:
+                value = evaluate(parameters[name]['value'], context)
+                self.assertEqual(value is None, mode == 'FULL')
+        procs = [node['typeProperties']['storedProcedureName'] for node in walk(ARTIFACTS) if node.get('type') == 'SqlServerStoredProcedure']
+        self.assertEqual(procs, ['ingestion.register_bronze_copy'])
 
     def test_plan_guard_blocks_wrong_version_id_mode_count_or_query(self):
         context = sample_context()

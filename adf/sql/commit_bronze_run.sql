@@ -1,6 +1,6 @@
 -- Transactional commit gate for independently reconciled Bronze runs.
 -- Requires a separately privileged reconciler to persist audit evidence.
--- Do NOT wire into ADF until that trusted evidence writer is implemented.
+-- Trusted external coordinator only; ADF cannot attest or commit.
 SET ANSI_NULLS ON;
 SET QUOTED_IDENTIFIER ON;
 GO
@@ -36,8 +36,17 @@ BEGIN
         FROM ingestion.bronze_run_audit WITH (UPDLOCK, HOLDLOCK)
         WHERE child_run_id=@child_run_id;
 
+        IF @status='COMMITTED'
+        BEGIN
+            COMMIT TRANSACTION;
+            RETURN; -- Exact immutable run replay, even after newer runs advance.
+        END;
         IF @config_id IS NULL OR @status <> 'RECONCILED'
             THROW 51212, 'Run does not have durable reconciled status.', 1;
+        IF NOT EXISTS(SELECT 1 FROM ingestion.bronze_run_audit WHERE child_run_id=@child_run_id
+                      AND manifest_sha256 IS NOT NULL AND manifest_json IS NOT NULL
+                      AND reconciled_at_utc IS NOT NULL AND attested_by IS NOT NULL)
+            THROW 51226, 'Independent reconciliation manifest is missing.', 1;
         IF @expected IS NULL OR @copied IS NULL OR @reconciled IS NULL
            OR @expected<>@copied OR @expected<>@reconciled
             THROW 51213, 'Reconciled and copied row counts must match plan.', 1;
@@ -45,7 +54,13 @@ BEGIN
         SELECT @pk=primary_key_columns
         FROM ingestion.table_config WITH (HOLDLOCK)
         WHERE config_id=@config_id AND load_type=@mode AND is_active=1;
-        IF @pk IS NULL
+        IF @pk IS NULL OR NOT EXISTS
+        (SELECT 1 FROM ingestion.bronze_run_audit AS a JOIN ingestion.table_config AS c ON c.config_id=a.config_id
+         WHERE a.child_run_id=@child_run_id AND a.primary_key_columns COLLATE Latin1_General_100_BIN2 =
+               c.primary_key_columns COLLATE Latin1_General_100_BIN2
+           AND ISNULL(a.watermark_column,N'') COLLATE Latin1_General_100_BIN2 =
+               ISNULL(c.watermark_column,N'') COLLATE Latin1_General_100_BIN2
+           AND LEFT(a.bronze_path,LEN(c.bronze_relative_path)+1)=c.bronze_relative_path+N'/')
             THROW 51214, 'Source configuration changed or was disabled.', 1;
 
         IF @mode='INCREMENTAL'
@@ -59,8 +74,8 @@ BEGIN
                OR @actual_version<>@expected_version
                 THROW 51215, 'Stale or missing watermark rowversion.', 1;
             IF @lower IS NULL OR @upper IS NULL OR @lower<>@current_lower
-               OR ISJSON(@lower_keys)<>1 OR ISJSON(@current_keys)<>1
-               OR ISJSON(@upper_keys)<>1
+               OR ISNULL(ISJSON(@lower_keys),0)<>1 OR ISNULL(ISJSON(@current_keys),0)<>1
+               OR ISNULL(ISJSON(@upper_keys),0)<>1
                 THROW 51216, 'Invalid or stale cursor boundary.', 1;
 
             SET @k1=JSON_VALUE(@pk,'$[0]');
@@ -68,6 +83,16 @@ BEGIN
             IF @k1 IS NULL OR JSON_VALUE(@pk,'$[2]') IS NOT NULL
                 THROW 51217, 'Unsupported key contract.', 1;
 
+            IF LEFT(LTRIM(@lower_keys),1)<>N'{' OR LEFT(LTRIM(@upper_keys),1)<>N'{'
+               OR LEFT(LTRIM(@current_keys),1)<>N'{'
+               OR EXISTS(SELECT [key] FROM OPENJSON(@lower_keys) GROUP BY [key] HAVING COUNT(*)>1)
+               OR EXISTS(SELECT [key] FROM OPENJSON(@upper_keys) GROUP BY [key] HAVING COUNT(*)>1)
+               OR EXISTS(SELECT [key] FROM OPENJSON(@current_keys) GROUP BY [key] HAVING COUNT(*)>1)
+               OR EXISTS(SELECT [key],[value],[type] FROM OPENJSON(@lower_keys)
+                         EXCEPT SELECT [key],[value],[type] FROM OPENJSON(@current_keys))
+               OR EXISTS(SELECT [key],[value],[type] FROM OPENJSON(@current_keys)
+                         EXCEPT SELECT [key],[value],[type] FROM OPENJSON(@lower_keys))
+                THROW 51219, 'Lower cursor key object differs from committed state.', 1;
             -- Validate exact key set and integer values, independent of JSON property order.
             IF (SELECT COUNT(*) FROM OPENJSON(@lower_keys)) <>
                (SELECT COUNT(*) FROM OPENJSON(@pk))
@@ -126,7 +151,7 @@ BEGIN
             THROW 51223, 'Unsupported load type.', 1;
 
         UPDATE ingestion.bronze_run_audit
-        SET status='COMMITTED', updated_at_utc=SYSUTCDATETIME()
+        SET status='COMMITTED', committed_at_utc=SYSUTCDATETIME(), updated_at_utc=SYSUTCDATETIME()
         WHERE child_run_id=@child_run_id AND status='RECONCILED';
         IF @@ROWCOUNT<>1
             THROW 51224, 'Audit commit transition failed.', 1;

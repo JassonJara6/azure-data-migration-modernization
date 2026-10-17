@@ -64,6 +64,10 @@ def evaluate(expression, context):
             return integer(args[0])
         if name == 'string':
             return json.dumps(args[0], separators=(',', ':')) if not isinstance(args[0], str) else args[0]
+        if name == 'json':
+            return json.loads(args[0])
+        if name == 'if':
+            return args[1] if boolean(args[0]) else args[2]
         if name == 'equals':
             return type(args[0]) is type(args[1]) and args[0] == args[1]
         if name in ['and', 'or']:

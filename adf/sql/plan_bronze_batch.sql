@@ -11,7 +11,7 @@ DECLARE @schema sysname, @table sysname, @mode varchar(11), @pk nvarchar(400),
 SELECT @schema=c.source_schema, @table=c.source_table, @mode=c.load_type,
        @pk=c.primary_key_columns, @watermark=c.watermark_column,
        @path=c.bronze_relative_path, @lower=s.watermark_value,
-       @keys=s.watermark_key_json, @version=CONVERT(varchar(18),s.row_version,1),
+       @keys=s.watermark_key_json, @version=CONVERT(varchar(18),CONVERT(binary(8),s.row_version),1),
        @run=s.last_successful_run_id, @success_at=s.last_successful_at_utc,
        @success_count=s.last_successful_row_count
 FROM ingestion.table_config AS c

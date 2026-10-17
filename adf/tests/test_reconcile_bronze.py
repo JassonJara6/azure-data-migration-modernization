@@ -41,7 +41,7 @@ def test_success():
 
 
 @pytest.mark.parametrize("files,expected,run_id", [
-    ([], 0, "run-123"),
+    ([], 1, "run-123"),
     ([sample()], 3, "run-123"),
     ([sample()], 2, "wrong-run"),
     ([sample(include_metadata=False)], 2, "run-123"),

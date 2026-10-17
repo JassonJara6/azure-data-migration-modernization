@@ -1,0 +1,2 @@
+-r requirements-reconcile.txt
+pyodbc>=5.1,<6

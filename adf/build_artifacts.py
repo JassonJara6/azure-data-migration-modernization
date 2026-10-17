@@ -169,6 +169,30 @@ def artifacts():
                  'ifTrueActivities': [], 'ifFalseActivities': [fail('CopyCountMismatch',
                      'Source changed or copy counters differ from the bounded expected count. Landing is uncommitted; watermark unchanged.',
                      'COPY_COUNT_MISMATCH')]}}]}}
+    # Bind values through Stored Procedure parameters; never concatenate SQL.
+    nullable = lambda field: expr("@if(equals(activity('PlanBatch').output.firstRow.load_type,'FULL'),json('null'),activity('PlanBatch').output.firstRow." + field + ")")
+    audit_parameters = {
+        'config_id': {'type': 'Int', 'value': expr('@pipeline().parameters.config_id')},
+        'parent_run_id': {'type': 'String', 'value': expr('@pipeline().parameters.parent_run_id')},
+        'child_run_id': {'type': 'String', 'value': expr('@pipeline().RunId')},
+        'bronze_path': {'type': 'String', 'value': copy['outputs'][0]['parameters']['folder_path']},
+        'load_type': {'type': 'String', 'value': plan('load_type')},
+        'expected_rows': {'type': 'String', 'value': plan('expected_rows')},
+        'copied_rows': {'type': 'String', 'value': expr("@string(activity('CopyToBronze').output.rowsCopied)")},
+        'watermark_lower': {'type': 'String', 'value': nullable('watermark_lower')},
+        'watermark_upper': {'type': 'String', 'value': nullable('watermark_upper')},
+        'watermark_lower_key_json': {'type': 'String', 'value': nullable('lower_key_json')},
+        'watermark_upper_key_json': {'type': 'String', 'value': nullable('upper_key_json')},
+        'expected_row_version': {'type': 'String', 'value': nullable('expected_row_version')},
+    }
+    child['properties']['activities'].append({
+        'name': 'RegisterCopyAudit', 'type': 'SqlServerStoredProcedure',
+        'dependsOn': after('CheckCopyCounters'),
+        'policy': {'timeout': '0.00:10:00', 'retry': 2, 'retryIntervalInSeconds': 15,
+                   'secureInput': True, 'secureOutput': True},
+        'linkedServiceName': {'referenceName': 'ls_sql_server', 'type': 'LinkedServiceReference'},
+        'typeProperties': {'storedProcedureName': 'ingestion.register_bronze_copy',
+                           'storedProcedureParameters': audit_parameters}})
     dataset_sql = {'name': 'ds_adventureworks_sql', 'properties': {
         'linkedServiceName': {'referenceName': 'ls_sql_server', 'type': 'LinkedServiceReference'},
         'parameters': {'source_schema': {'type': 'String'}, 'source_table': {'type': 'String'}},

@@ -1,0 +1,35 @@
+name: Bronze reconciliation tests
+on:
+  pull_request:
+    paths: ['adf/**', 'tests/phase3/**', '.github/workflows/bronze-reconciliation-tests.yml']
+  push:
+    branches: ['feature/bronze-audit-reconciliation-commit']
+    paths: ['adf/**', 'tests/phase3/**', '.github/workflows/bronze-reconciliation-tests.yml']
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install pytest -r adf/tools/requirements-commit.txt
+      - run: python adf/build_artifacts.py --check
+      - run: python -m unittest discover -s tests/phase3 -p 'test_*.py' -v
+      - run: python -m pytest -q adf/tests
+      - run: python -m compileall -q adf/tools adf/tests
+  sql-server:
+    needs: unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install native Linux ODBC driver dependencies
+        run: sudo apt-get update && sudo apt-get install -y unixodbc libltdl7 libgssapi-krb5-2
+      - run: python -m pip install pytest pyodbc
+      - name: Test real stored procedures in a disposable SQL Server (no Azure)
+        run: python adf/tests/run_sql_integration.py

@@ -11,7 +11,7 @@ DECLARE @schema sysname, @table sysname, @mode varchar(11), @pk nvarchar(400),
 SELECT @schema=c.source_schema, @table=c.source_table, @mode=c.load_type,
        @pk=c.primary_key_columns, @watermark=c.watermark_column,
        @path=c.bronze_relative_path, @lower=s.watermark_value,
-       @keys=s.watermark_key_json, @version=CONVERT(varchar(18),s.row_version,1),
+       @keys=s.watermark_key_json, @version=CONVERT(varchar(18),CONVERT(binary(8),s.row_version),1),
        @run=s.last_successful_run_id, @success_at=s.last_successful_at_utc,
        @success_count=s.last_successful_row_count
 FROM ingestion.table_config AS c
@@ -129,7 +129,9 @@ IF EXISTS (SELECT 1 FROM sys.columns AS c JOIN sys.types AS t ON t.user_type_id=
     THROW 51109, 'Unsupported CLR source type requires an explicit projection.', 1;
 DECLARE @columns nvarchar(max);
 SELECT @columns=STUFF((SELECT N','+
-    CASE WHEN c.system_type_id=241 THEN N'CONVERT(nvarchar(max),'+QUOTENAME(c.name)+N')'
+    CASE WHEN @mode='INCREMENTAL' AND c.name=@watermark
+              THEN N'CONVERT(datetime2(7),'+QUOTENAME(c.name)+N')'
+         WHEN c.system_type_id=241 THEN N'CONVERT(nvarchar(max),'+QUOTENAME(c.name)+N')'
          WHEN c.system_type_id=240 AND t.name=N'hierarchyid' THEN N'CONVERT(nvarchar(4000),'+QUOTENAME(c.name)+N')'
          WHEN c.system_type_id=240 THEN QUOTENAME(c.name)+N'.Serialize()'
          ELSE QUOTENAME(c.name) END+N' AS '+QUOTENAME(c.name)

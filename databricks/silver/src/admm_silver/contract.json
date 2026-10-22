@@ -1,0 +1,859 @@
+{
+  "version": 1,
+  "provenance": {
+    "repository_contract": "sql/metadata/002_seed_ingestion_metadata.sql",
+    "ddl_url": "https://raw.githubusercontent.com/microsoft/sql-server-samples/dac9747acaca4e54a3b5ea4c6de1c4be6c1b964a/samples/databases/adventure-works/oltp-install-script/instawdb.sql",
+    "ddl_sha256": "d979f036750f9c7b4fb7be3d58cdbb596a74f864a6325998501b3a96c6ad53f9",
+    "note": "Canonical SQL DDL, not an observed live Parquet schema. Runtime validates physical schemas before writes. Computed money/decimal types follow SQL Server arithmetic precision rules."
+  },
+  "tables": [
+    {
+      "source": "Person.Person",
+      "target": "person_person",
+      "mode": "INCREMENTAL",
+      "pk": [
+        "BusinessEntityID"
+      ],
+      "path": "adventureworks/person/person",
+      "columns": [
+        {
+          "name": "BusinessEntityID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "PersonType",
+          "sql_type": "nchar",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "NameStyle",
+          "sql_type": "NameStyle",
+          "type": "boolean",
+          "nullable": false
+        },
+        {
+          "name": "Title",
+          "sql_type": "nvarchar",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "FirstName",
+          "sql_type": "Name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "MiddleName",
+          "sql_type": "Name",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "LastName",
+          "sql_type": "Name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "Suffix",
+          "sql_type": "nvarchar",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "EmailPromotion",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "AdditionalContactInfo",
+          "sql_type": "XML",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "Demographics",
+          "sql_type": "XML",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "rowguid",
+          "sql_type": "uniqueidentifier",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "ModifiedDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "source": "Person.Address",
+      "target": "person_address",
+      "mode": "INCREMENTAL",
+      "pk": [
+        "AddressID"
+      ],
+      "path": "adventureworks/person/address",
+      "columns": [
+        {
+          "name": "AddressID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "AddressLine1",
+          "sql_type": "nvarchar",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "AddressLine2",
+          "sql_type": "nvarchar",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "City",
+          "sql_type": "nvarchar",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "StateProvinceID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "PostalCode",
+          "sql_type": "nvarchar",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "SpatialLocation",
+          "sql_type": "geography",
+          "type": "opaque",
+          "nullable": true
+        },
+        {
+          "name": "rowguid",
+          "sql_type": "uniqueidentifier",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "ModifiedDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "source": "Person.StateProvince",
+      "target": "person_stateprovince",
+      "mode": "FULL",
+      "pk": [
+        "StateProvinceID"
+      ],
+      "path": "adventureworks/person/stateprovince",
+      "columns": [
+        {
+          "name": "StateProvinceID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "StateProvinceCode",
+          "sql_type": "nchar",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "CountryRegionCode",
+          "sql_type": "nvarchar",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "IsOnlyStateProvinceFlag",
+          "sql_type": "Flag",
+          "type": "boolean",
+          "nullable": false
+        },
+        {
+          "name": "Name",
+          "sql_type": "Name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "TerritoryID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "rowguid",
+          "sql_type": "uniqueidentifier",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "ModifiedDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "source": "Person.CountryRegion",
+      "target": "person_countryregion",
+      "mode": "FULL",
+      "pk": [
+        "CountryRegionCode"
+      ],
+      "path": "adventureworks/person/countryregion",
+      "columns": [
+        {
+          "name": "CountryRegionCode",
+          "sql_type": "nvarchar",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "Name",
+          "sql_type": "Name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "ModifiedDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "source": "Production.Product",
+      "target": "production_product",
+      "mode": "INCREMENTAL",
+      "pk": [
+        "ProductID"
+      ],
+      "path": "adventureworks/production/product",
+      "columns": [
+        {
+          "name": "ProductID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "Name",
+          "sql_type": "Name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "ProductNumber",
+          "sql_type": "nvarchar",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "MakeFlag",
+          "sql_type": "Flag",
+          "type": "boolean",
+          "nullable": false
+        },
+        {
+          "name": "FinishedGoodsFlag",
+          "sql_type": "Flag",
+          "type": "boolean",
+          "nullable": false
+        },
+        {
+          "name": "Color",
+          "sql_type": "nvarchar",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "SafetyStockLevel",
+          "sql_type": "smallint",
+          "type": "smallint",
+          "nullable": false
+        },
+        {
+          "name": "ReorderPoint",
+          "sql_type": "smallint",
+          "type": "smallint",
+          "nullable": false
+        },
+        {
+          "name": "StandardCost",
+          "sql_type": "money",
+          "type": "decimal(19,4)",
+          "nullable": false
+        },
+        {
+          "name": "ListPrice",
+          "sql_type": "money",
+          "type": "decimal(19,4)",
+          "nullable": false
+        },
+        {
+          "name": "Size",
+          "sql_type": "nvarchar",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "SizeUnitMeasureCode",
+          "sql_type": "nchar",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "WeightUnitMeasureCode",
+          "sql_type": "nchar",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "Weight",
+          "sql_type": "decimal",
+          "type": "decimal(8,2)",
+          "nullable": true
+        },
+        {
+          "name": "DaysToManufacture",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "ProductLine",
+          "sql_type": "nchar",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "Class",
+          "sql_type": "nchar",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "Style",
+          "sql_type": "nchar",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "ProductSubcategoryID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": true
+        },
+        {
+          "name": "ProductModelID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": true
+        },
+        {
+          "name": "SellStartDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": false
+        },
+        {
+          "name": "SellEndDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "DiscontinuedDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "rowguid",
+          "sql_type": "uniqueidentifier",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "ModifiedDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "source": "Production.ProductCategory",
+      "target": "production_productcategory",
+      "mode": "FULL",
+      "pk": [
+        "ProductCategoryID"
+      ],
+      "path": "adventureworks/production/productcategory",
+      "columns": [
+        {
+          "name": "ProductCategoryID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "Name",
+          "sql_type": "Name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "rowguid",
+          "sql_type": "uniqueidentifier",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "ModifiedDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "source": "Production.ProductSubcategory",
+      "target": "production_productsubcategory",
+      "mode": "FULL",
+      "pk": [
+        "ProductSubcategoryID"
+      ],
+      "path": "adventureworks/production/productsubcategory",
+      "columns": [
+        {
+          "name": "ProductSubcategoryID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "ProductCategoryID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "Name",
+          "sql_type": "Name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "rowguid",
+          "sql_type": "uniqueidentifier",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "ModifiedDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "source": "Sales.Customer",
+      "target": "sales_customer",
+      "mode": "FULL",
+      "pk": [
+        "CustomerID"
+      ],
+      "path": "adventureworks/sales/customer",
+      "columns": [
+        {
+          "name": "CustomerID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "PersonID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": true
+        },
+        {
+          "name": "StoreID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": true
+        },
+        {
+          "name": "TerritoryID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": true
+        },
+        {
+          "name": "AccountNumber",
+          "sql_type": "AS",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "rowguid",
+          "sql_type": "uniqueidentifier",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "ModifiedDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "source": "Sales.SalesOrderHeader",
+      "target": "sales_salesorderheader",
+      "mode": "INCREMENTAL",
+      "pk": [
+        "SalesOrderID"
+      ],
+      "path": "adventureworks/sales/salesorderheader",
+      "columns": [
+        {
+          "name": "SalesOrderID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "RevisionNumber",
+          "sql_type": "tinyint",
+          "type": "smallint",
+          "nullable": false
+        },
+        {
+          "name": "OrderDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": false
+        },
+        {
+          "name": "DueDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": false
+        },
+        {
+          "name": "ShipDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": true
+        },
+        {
+          "name": "Status",
+          "sql_type": "tinyint",
+          "type": "smallint",
+          "nullable": false
+        },
+        {
+          "name": "OnlineOrderFlag",
+          "sql_type": "Flag",
+          "type": "boolean",
+          "nullable": false
+        },
+        {
+          "name": "SalesOrderNumber",
+          "sql_type": "AS",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "PurchaseOrderNumber",
+          "sql_type": "OrderNumber",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "AccountNumber",
+          "sql_type": "AccountNumber",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "CustomerID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "SalesPersonID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": true
+        },
+        {
+          "name": "TerritoryID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": true
+        },
+        {
+          "name": "BillToAddressID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "ShipToAddressID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "ShipMethodID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "CreditCardID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": true
+        },
+        {
+          "name": "CreditCardApprovalCode",
+          "sql_type": "varchar",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "CurrencyRateID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": true
+        },
+        {
+          "name": "SubTotal",
+          "sql_type": "money",
+          "type": "decimal(19,4)",
+          "nullable": false
+        },
+        {
+          "name": "TaxAmt",
+          "sql_type": "money",
+          "type": "decimal(19,4)",
+          "nullable": false
+        },
+        {
+          "name": "Freight",
+          "sql_type": "money",
+          "type": "decimal(19,4)",
+          "nullable": false
+        },
+        {
+          "name": "TotalDue",
+          "sql_type": "AS",
+          "type": "decimal(19,4)",
+          "nullable": false
+        },
+        {
+          "name": "Comment",
+          "sql_type": "nvarchar",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "rowguid",
+          "sql_type": "uniqueidentifier",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "ModifiedDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "source": "Sales.SalesOrderDetail",
+      "target": "sales_salesorderdetail",
+      "mode": "INCREMENTAL",
+      "pk": [
+        "SalesOrderID",
+        "SalesOrderDetailID"
+      ],
+      "path": "adventureworks/sales/salesorderdetail",
+      "columns": [
+        {
+          "name": "SalesOrderID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "SalesOrderDetailID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "CarrierTrackingNumber",
+          "sql_type": "nvarchar",
+          "type": "string",
+          "nullable": true
+        },
+        {
+          "name": "OrderQty",
+          "sql_type": "smallint",
+          "type": "smallint",
+          "nullable": false
+        },
+        {
+          "name": "ProductID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "SpecialOfferID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "UnitPrice",
+          "sql_type": "money",
+          "type": "decimal(19,4)",
+          "nullable": false
+        },
+        {
+          "name": "UnitPriceDiscount",
+          "sql_type": "money",
+          "type": "decimal(19,4)",
+          "nullable": false
+        },
+        {
+          "name": "LineTotal",
+          "sql_type": "AS",
+          "type": "decimal(38,6)",
+          "nullable": false
+        },
+        {
+          "name": "rowguid",
+          "sql_type": "uniqueidentifier",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "ModifiedDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "source": "Sales.SalesTerritory",
+      "target": "sales_salesterritory",
+      "mode": "FULL",
+      "pk": [
+        "TerritoryID"
+      ],
+      "path": "adventureworks/sales/salesterritory",
+      "columns": [
+        {
+          "name": "TerritoryID",
+          "sql_type": "int",
+          "type": "int",
+          "nullable": false
+        },
+        {
+          "name": "Name",
+          "sql_type": "Name",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "CountryRegionCode",
+          "sql_type": "nvarchar",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "Group",
+          "sql_type": "nvarchar",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "SalesYTD",
+          "sql_type": "money",
+          "type": "decimal(19,4)",
+          "nullable": false
+        },
+        {
+          "name": "SalesLastYear",
+          "sql_type": "money",
+          "type": "decimal(19,4)",
+          "nullable": false
+        },
+        {
+          "name": "CostYTD",
+          "sql_type": "money",
+          "type": "decimal(19,4)",
+          "nullable": false
+        },
+        {
+          "name": "CostLastYear",
+          "sql_type": "money",
+          "type": "decimal(19,4)",
+          "nullable": false
+        },
+        {
+          "name": "rowguid",
+          "sql_type": "uniqueidentifier",
+          "type": "string",
+          "nullable": false
+        },
+        {
+          "name": "ModifiedDate",
+          "sql_type": "datetime",
+          "type": "timestamp",
+          "nullable": false
+        }
+      ]
+    }
+  ]
+}

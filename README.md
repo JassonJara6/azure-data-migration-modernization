@@ -2,19 +2,19 @@
 
 A production-style, portfolio-sized data platform that will move the AdventureWorks OLTP data through Azure Data Factory, ADLS Gen2, and Azure Databricks into a dimensional model.
 
-> **Current scope:** Phase 1 source setup is complete; Phase 2 Terraform infrastructure is implemented. Phase 3 now includes the SQL ingestion metadata foundation; [dynamic ADF Bronze landing artifacts](docs/phase-3-adf-bronze.md) are implemented but unpublished, with watermark confirmation blocked.
+> **Current plan:** Phase 1 source/platform foundation is complete. Phase 2 Bronze has one real COMMITTED parent with eleven loads, reported by the operator (`20d65511-8190-41a0-8ad2-23d7568363d2`); Azure R2 is still pending. **Phase 3 Silver** now has [PySpark/Delta code, Unity Catalog configuration, a single Databricks Job and local tests](databricks/silver/README.md); real Databricks validation is pending. Historical `phase-3-*` documents refer to Bronze and retain their original names.
 
 ## Target architecture
 
 ```text
 AdventureWorks SQL Server
-        │  full + watermark-based incremental extraction (future Phase 3)
+        │  full + watermark-based incremental extraction
         ▼
 Azure Data Factory ──► ADLS Gen2 / Bronze ──► Databricks / Silver ──► Gold
                               raw                  validated              dimensional
 ```
 
-Secrets will be held in Azure Key Vault. Azure resources are defined with Terraform; GitHub Actions CI/CD remains planned for a later phase.
+Existing Bronze uses Azure Key Vault and published Linked Services. Silver uses Unity Catalog identities and volumes, without embedded credentials. GitHub Actions tests Bronze and Silver locally; this repository does not automatically deploy them to Azure.
 
 ## Phase 1 quick start
 
@@ -45,26 +45,22 @@ Stop the container without deleting its database volume with `make source-down`.
 ├── docker-compose.yml          # Reproducible local SQL Server
 ├── scripts/                    # Local automation
 ├── sql/source/                 # Restore and profiling SQL
-├── sql/metadata/               # Phase 3 control tables, seed, and validation
+├── sql/metadata/               # Bronze control tables, seed, and validation
 ├── docs/                       # Architecture decisions and source notes
-├── terraform/                  # Phase 2 bootstrap and dev infrastructure
-├── adf/                        # Phase 3 datasets, pipelines, and read-only SQL planner
-├── databricks/                 # Reserved for Phases 4–6
+├── terraform/                  # Existing bootstrap and dev infrastructure
+├── adf/                        # Bronze pipelines, reconciliation, and guarded SQL commit
+├── databricks/                 # Silver package, Job bundle, contracts, and tests
 ├── tests/                      # Automated tests added with each phase
-└── .github/workflows/          # CI/CD added in Phase 7
+└── .github/workflows/          # Local Bronze and Silver test workflows
 ```
 
 Empty phase directories contain `.gitkeep` files solely to make the planned boundaries visible; they do not represent implemented Azure work.
 
-## Delivery roadmap
+## Delivery roadmap (current plan)
 
-- [x] **Phase 1:** local source, exploration, and source contract
-- [x] **Phase 2:** Azure infrastructure with Terraform (bootstrap and dev definitions)
-- [ ] **Phase 3:** metadata-driven Bronze ingestion ([metadata foundation implemented](docs/phase-3-ingestion-metadata.md); [ADF landing prototype](docs/phase-3-adf-bronze.md) unpublished, safe confirmation pending)
-- [ ] Phase 4: Silver transformations and data quality
-- [ ] Phase 5: Gold dimensional model
-- [ ] Phase 6: observability, reconciliation, and error handling
-- [ ] Phase 7: CI/CD and automated testing
-- [ ] Phase 8: documentation and portfolio presentation
+- [x] **Phase 1:** local source, source contract and platform foundation.
+- [x] **Phase 2 — Bronze R1:** real parent COMMITTED with eleven reconciled loads, per operator evidence; [R2 acceptance](adf/docs/bronze-end-to-end-rollout.md) remains pending. The ADF confirmation block is retained; external SQL receipts represent confirmation.
+- [ ] **Phase 3 — Silver:** implementation and automated local validation in this repository; [one-Job Databricks acceptance](databricks/silver/README.md) pending deployment/configuration and a real run.
+- [ ] Gold and later delivery phases remain outside this change.
 
-Phase 1 was completed after the restore and 11-table profile were validated locally. Phase 2 currently includes the [remote-state bootstrap](terraform/bootstrap/README.md), ADLS Gen2, an empty Azure Data Factory with SHIR and Bronze-only access, and an RBAC-enabled Key Vault for future SQL secrets, documented in the [dev Terraform root](terraform/environments/dev/README.md).
+The repository retains historical phase numbers in source/metadata/ADF and Terraform runbooks. Current Silver documentation governs this increment and does not rename or reset earlier work. Existing infrastructure definitions remain documented in the [bootstrap](terraform/bootstrap/README.md) and [dev Terraform root](terraform/environments/dev/README.md).

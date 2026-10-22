@@ -1,0 +1,28 @@
+name: Silver local Spark and Delta tests
+on:
+  pull_request:
+    paths: ['databricks/silver/**', '.github/workflows/silver-tests.yml', 'sql/metadata/002_seed_ingestion_metadata.sql']
+  push:
+    branches: ['feature/databricks-silver']
+    paths: ['databricks/silver/**', '.github/workflows/silver-tests.yml']
+permissions:
+  contents: read
+jobs:
+  silver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: python -m pip install './databricks/silver[test]' build
+      - name: Resolve pinned OSS Delta jars
+        run: echo "SILVER_DELTA_JARS=$(python databricks/silver/tests/download_delta_jars.py "$RUNNER_TEMP/delta-jars")" >> "$GITHUB_ENV"
+      - run: python -m pytest -q databricks/silver/tests
+      - run: python -m build --wheel databricks/silver
+      - run: python -m compileall -q databricks/silver/src databricks/silver/tools databricks/silver/notebooks

@@ -1,0 +1,62 @@
+bundle:
+  name: adventureworks-silver
+
+variables:
+  catalog:
+    description: Existing Unity Catalog catalog
+  schema:
+    description: Existing isolated Silver schema; sole writer is this Job
+  existing_cluster_id:
+    description: Existing UC-enabled DBR 15.4 LTS cluster (not provisioned by this bundle)
+  bronze_volume:
+    description: Existing EXTERNAL UC volume rooted at the Bronze container
+  receipt_file:
+    description: Approved committed-parent JSON in a write-restricted UC volume
+  account:
+    default: stadmmdevdlf6d99ba4
+  parent_run_id:
+    default: 20d65511-8190-41a0-8ad2-23d7568363d2
+
+artifacts:
+  silver_wheel:
+    type: whl
+    path: .
+    build: python -m build --wheel
+
+resources:
+  jobs:
+    silver:
+      name: adventureworks-silver-${bundle.target}
+      max_concurrent_runs: 1
+      timeout_seconds: 7200
+      parameters:
+        - name: parent_run_id
+          default: ${var.parent_run_id}
+        - name: receipt_file
+          default: ${var.receipt_file}
+      tasks:
+        - task_key: transform_and_verify
+          existing_cluster_id: ${var.existing_cluster_id}
+          max_retries: 0
+          notebook_task:
+            notebook_path: ./notebooks/run_silver.py
+            base_parameters:
+              catalog: ${var.catalog}
+              schema: ${var.schema}
+              bronze_volume: ${var.bronze_volume}
+              account: ${var.account}
+              parent_run_id: '{{job.parameters.parent_run_id}}'
+              receipt_file: '{{job.parameters.receipt_file}}'
+              replay_check: 'true'
+              execution_id: '{{job.run_id}}'
+          libraries:
+            - whl: ./dist/*.whl
+      tags:
+        layer: silver
+        project: azure-data-migration-modernization
+
+targets:
+  dev:
+    default: true
+    # Deliberately omit development mode: its concurrency override can defeat
+    # max_concurrent_runs=1. Each environment uses a separate UC schema.

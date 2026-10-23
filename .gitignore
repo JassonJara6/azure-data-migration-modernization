@@ -17,3 +17,5 @@ override.tf.json
 __pycache__/
 .pytest_cache/
 .DS_Store
+# Local deployment evidence/config/plans may contain sensitive state metadata.
+work/

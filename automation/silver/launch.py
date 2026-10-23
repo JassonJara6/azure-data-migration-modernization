@@ -17,6 +17,7 @@ import urllib.parse
 import yaml
 from plan_guard import Blocked,require,review,sha
 from bundle_overlay import ephemeral_bundle
+from diagnose import diagnose, safe_failure, SUBSCRIPTION, TENANT
 
 ROOT=Path(__file__).resolve().parents[2]
 PLATFORM=ROOT/'terraform/environments/dev'
@@ -28,9 +29,15 @@ SOURCES={'Person.Person','Person.Address','Person.StateProvince','Person.Country
 def command(args,*,cwd=ROOT,env=None,json_output=False,allowed=(0,),interactive=False):
     # Never echo raw external error output: SDK/CLI messages may contain tokens.
     program=shutil.which(str(args[0])) or str(args[0])
-    result=subprocess.run([program,*map(str,args[1:])],cwd=cwd,env=env,
-       text=True,capture_output=not interactive)
-    require(result.returncode in allowed,'COMMAND_FAILED_'+Path(str(args[0])).stem.upper())
+    try:
+        result=subprocess.run([program,*map(str,args[1:])],cwd=cwd,env=env,
+           text=True,capture_output=not interactive)
+    except FileNotFoundError:
+        raise Blocked('TOOL_MISSING_'+Path(str(args[0])).stem.upper()) from None
+    if result.returncode not in allowed:
+        detail=safe_failure((result.stderr or '')+'\n'+(result.stdout or ''),
+                            'COMMAND_FAILED_'+Path(str(args[0])).stem.upper())
+        raise Blocked(json.dumps(detail,sort_keys=True))
     if interactive:return None
     return json.loads(result.stdout) if json_output else result.stdout
 
@@ -84,33 +91,37 @@ def validate_result(result,parent):
 
 
 class Launcher:
-    def __init__(self,config,deploy):
-        self.c=config;self.deploy=deploy
+    def __init__(self,config,deploy,stage="all"):
+        self.c=config;self.deploy=deploy;self.stage=stage
         require(not os.environ.get('DATABRICKS_TOKEN'),'PAT_NOT_SUPPORTED')
-        uuid(config['account_id'])
         require(re.fullmatch(r'[a-z][a-z0-9_]{0,62}',config.get('catalog_name','admm_dev')),'INVALID_CATALOG')
         self.work=ROOT/'work/silver-deployment';self.work.mkdir(parents=True,exist_ok=True)
         self.work.chmod(0o700)
         self.env=dict(os.environ)
         # Real backend continues to use Azure CLI / federated credential handling.
         azure=command(['az','account','show','-o','json'],json_output=True)
-        subscription=config.get('subscription_id') or azure['id'];uuid(subscription)
+        subscription=config.get('subscription_id') or SUBSCRIPTION;uuid(subscription)
+        uuid(config.get('tenant_id') or TENANT)
         require(azure['id'].lower()==subscription.lower(),'AZURE_SUBSCRIPTION_MISMATCH')
+        require(azure['tenantId'].lower()==(config.get('tenant_id') or TENANT).lower(),'AZURE_TENANT_MISMATCH')
+        self.env['ARM_SUBSCRIPTION_ID']=subscription
+        self.env['ARM_TENANT_ID']=azure['tenantId']
         registered=command(['az','provider','show','--namespace','Microsoft.Databricks','--query','registrationState','-o','tsv'])
         require(registered.strip() in ('Registered','NotRegistered'),'AZURE_PROVIDER_REGISTRATION_PENDING')
         self.register_provider=registered.strip()!='Registered'
         self.env['TF_VAR_subscription_id']=subscription
         self.account_env={k:v for k,v in self.env.items() if k not in ('DATABRICKS_HOST','DATABRICKS_AUTH_TYPE','DATABRICKS_AZURE_RESOURCE_ID')}
-        self.metastores=self.account_api('get',f'/api/2.0/accounts/{config["account_id"]}/metastores')
-        choose_metastore(self.metastores,config.get('metastore_id'),config.get('allow_create_metastore',False))
         self.ws_env=None
     def account_api(self,method,path):
         try:return command(['databricks','api',method,path,'--profile',self.c.get('account_profile','admm-account')],env=self.account_env,json_output=True)
-        except Blocked:raise Blocked('ACCOUNT_ADMIN_OAUTH_OR_CONNECTIVITY_REQUIRED') from None
+        except Blocked as exc:raise Blocked('ACCOUNT_ADMIN_OAUTH_OR_CONNECTIVITY_REQUIRED: '+str(exc)) from None
     def api(self,method,path):
         return command(['databricks','api',method,path],env=self.ws_env,json_output=True)
     def tf(self,root,*args,**kwargs):
-        return command(['terraform','-chdir='+str(root),*args],env=self.env,**kwargs)
+        try:return command(['terraform','-chdir='+str(root),*args],env=self.env,**kwargs)
+        except Blocked as exc:
+            stage='PLATFORM' if root==PLATFORM else 'UC'
+            raise Blocked(stage+'_'+str(args[0]).upper()+': '+str(exc)) from None
     def init(self,root):
         # No -reconfigure, -migrate-state, force-copy or backend overrides.
         self.tf(root,'init','-input=false','-lockfile=readonly')
@@ -136,7 +147,7 @@ class Launcher:
             self.tf(root,'apply','-input=false',str(saved))
         return not changes or self.deploy
     def provision(self):
-        if self.deploy:
+        if self.deploy and getattr(self,"stage","all")=="all":
             require((ROOT/'databricks/silver/databricks.yml').is_file() and
                     (ROOT/'databricks/silver/tools/export_committed_parent.py').is_file(),'PR18_REQUIRED_BEFORE_DEPLOY')
         self.init(PLATFORM)
@@ -150,7 +161,14 @@ class Launcher:
         values=self.outputs(PLATFORM)
         workspace=values.get('silver_workspace',{}).get('value')
         if not applied or not workspace:
-            print(json.dumps({'status':'PLAN_ONLY','uc_plan':'DEFERRED_UNTIL_WORKSPACE_EXISTS'}));return None
+            reason='DEFERRED_UNTIL_PLATFORM_PLAN_APPLIED' if not applied else 'DEFERRED_UNTIL_WORKSPACE_OUTPUT_EXISTS'
+            print(json.dumps({'status':'PLAN_ONLY','uc_plan':reason}));return None
+        if getattr(self,'stage','all')=='workspace':
+            print(json.dumps({'status':'WORKSPACE_STAGE_COMPLETE','uc':'NOT_CONFIGURED_OR_VERIFIED',
+                              'silver':'NOT_DEPLOYED','next':'Configure authorized Databricks account OAuth, then rerun --stage all'}))
+            return None
+        uuid(self.c.get('account_id'))
+        require('@' in self.c.get('operator_user_name',''),'OPERATOR_UPN_REQUIRED')
         self.ws_env=dict(self.env,DATABRICKS_HOST=workspace['workspace_host'],DATABRICKS_AUTH_TYPE='azure-cli',
                         DATABRICKS_AZURE_RESOURCE_ID=workspace['workspace_resource_id'])
         self.init(UC)
@@ -306,12 +324,17 @@ class Launcher:
         print(json.dumps(acceptance,indent=2))
 
 
-def load_config(path):
+def load_config(path,workspace_only=False):
     path=Path(path).resolve()
     require(path.is_relative_to(ROOT/'work') and path.suffix=='.json','PRIVATE_CONFIG_PATH_REQUIRED')
-    if not path.exists():
-        config=json.loads((ROOT/'automation/silver/config.example.json').read_text())
-        print('Configuración inicial (sin contraseñas): cuenta Databricks, perfil OAuth y operador autorizado.')
+    existed=path.exists()
+    config=json.loads(path.read_text()) if existed else json.loads((ROOT/'automation/silver/config.example.json').read_text())
+    if workspace_only:
+        if not existed:
+            config['account_id']=None;config['operator_user_name']=None
+            config['subscription_id']=SUBSCRIPTION;config['tenant_id']=TENANT
+    elif not existed or not config.get('account_id') or not config.get('operator_user_name'):
+        print('Configuración de cuenta (sin contraseñas): Account ID, perfil OAuth y operador autorizado.')
         config['account_id']=uuid(input('Databricks Account ID: ').strip())
         config['account_profile']=input('Perfil OAuth de cuenta [admm-account]: ').strip() or 'admm-account'
         config['operator_user_name']=input('UPN del operador autorizado: ').strip()
@@ -319,23 +342,37 @@ def load_config(path):
         answer=input('Permitir proponer un metastore nuevo solo si no existe East US (admin de cuenta) [no]: ').strip().lower()
         require(answer in ('','no','si','sí','yes'),'INVALID_METASTORE_CHOICE')
         config['allow_create_metastore']=answer in ('si','sí','yes')
+    if not existed or not workspace_only:
         path.parent.mkdir(parents=True,exist_ok=True);path.write_text(json.dumps(config,indent=2),encoding='utf-8');path.chmod(0o600)
-        print('Guardado en '+str(path)+'. No se habilita creación de metastore por defecto.')
-    return json.loads(path.read_text())
+    return config
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config',required=True)
+    parser.add_argument('--config',default='work/silver-dev.json')
+    parser.add_argument('--diagnose',action='store_true',help='Read-only Azure identity/context/RBAC diagnosis; no login prompts or Terraform')
+    parser.add_argument('--graph',action='store_true',help='Optional directory/security-defaults checks; requires existing delegated permissions')
+    parser.add_argument('--correlation-id',help='Optional Entra sign-in correlation UUID; requires --graph and AuditLog.Read.All')
+    parser.add_argument('--stage',choices=('workspace','all'),default='workspace',help='workspace excludes all Databricks account/UC/Job operations')
     parser.add_argument('--deploy',action='store_true',help='Request saved-plan and deployment approvals interactively')
     parser.add_argument('--stop',action='store_true',help='Cancel only the last recorded Silver run')
     args=parser.parse_args()
     try:
+        require(not (args.diagnose and (args.deploy or args.stop)),'DIAGNOSE_IS_READ_ONLY')
+        require(not args.correlation_id or args.graph,'CORRELATION_REQUIRES_GRAPH')
+        require(not args.graph or args.diagnose,'GRAPH_REQUIRES_DIAGNOSE')
+        if args.diagnose:
+            path=Path(args.config).resolve()
+            require(path.is_relative_to(ROOT/'work') and path.suffix=='.json','PRIVATE_CONFIG_PATH_REQUIRED')
+            config=json.loads(path.read_text()) if path.exists() else {}
+            result=diagnose(config,graph=args.graph,correlation_id=args.correlation_id)
+            print(json.dumps(result,indent=2))
+            return 0 if result['status']=='AZURE_ACCESS_OBSERVED' else 1
         if args.stop:
             last=json.loads((ROOT/'work/silver-deployment/last-run.json').read_text())
             env=dict(os.environ,DATABRICKS_HOST=last['host'],DATABRICKS_AUTH_TYPE='azure-cli',DATABRICKS_AZURE_RESOURCE_ID=last['workspace_resource_id'])
             command(['databricks','jobs','cancel-run',str(last['run_id']),'--no-wait'],env=env);return 0
-        launch=Launcher(load_config(args.config),args.deploy)
+        launch=Launcher(load_config(args.config,workspace_only=args.stage=="workspace"),args.deploy,stage=args.stage)
         deployed=launch.provision()
         if deployed and args.deploy:launch.deploy_job(*deployed)
         return 0

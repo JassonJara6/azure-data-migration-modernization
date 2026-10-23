@@ -1,6 +1,6 @@
 # Puesta en marcha Silver — infraestructura y automatización
 
-Este PR es independiente del PR #18. Parte de `main` con Bronze #17 fusionado y **no incorpora las transformaciones Silver**. Para desplegar se requieren ambos cambios revisados/integrados; el launcher bloquea `--deploy` si faltan el bundle o el exportador de #18. No hace merges, cherry-picks ni checkout automático de código remoto.
+Silver y la infraestructura están fusionados en `main`. La **[guía única de bootstrap y diagnóstico](BOOTSTRAP.md)** gobierna el orden de puesta en marcha y los bloqueos de identidad. Este documento conserva el detalle de infraestructura, seguridad, costos y ejecución del Job. No se realizan merges, cherry-picks ni checkout automático de código remoto.
 
 Contexto fijado: RG `rg-admm-dev-platform`, East US, ADLS `stadmmdevdlf6d99ba4`, filesystem Bronze existente, parent `20d65511-8190-41a0-8ad2-23d7568363d2`. Su COMMITTED de once cargas es evidencia comunicada por el operador; esta entrega no lo volvió a consultar. R2/ADF no se ejecutan.
 
@@ -37,25 +37,25 @@ El workspace usa networking administrado de Azure Databricks con acceso público
 5. **Microsoft.Databricks RP:** se comprueba su registro. No hay registro implícito durante `plan` (`resource_provider_registrations=none`). Si falta, aparece como recurso explícito en el plan y depende de su aprobación; no se desregistra si posteriormente lo reutilizan otros workspaces.
 6. **Capacidad:** disponibilidad de DBR `15.4.x-scala2.12`, VM `Standard_D4ds_v5` y cuota Azure de vCPU regional/familia. Se verifican tipos/runtime por API tras crear el workspace; que el tipo exista no garantiza cuota/capacidad instantánea. Un fallo debe investigarse sin iniciar ADF ni cambiar Bronze. Los grants Azure RBAC pueden tardar minutos en propagarse al data plane; una validación de external location puede fallar transitoriamente tras el primer apply. Conservar estado y reintentar el procedimiento tras comprobar propagación, sin recrear recursos ni omitir validaciones.
 
-Si faltan cuenta, OAuth o privilegios administrativos, el procedimiento se detiene. No existe un aprovisionamiento UC universal desde una cuenta Azure Contributor. Los administradores deben preparar ese acceso una sola vez; esta entrega no lo pudo verificar en vivo.
+Si faltan cuenta, OAuth o privilegios administrativos, las etapas UC/Job se detienen; el bootstrap Azure independiente puede planificarse con una sesión ARM autorizada. No existe un aprovisionamiento UC universal desde una cuenta Azure Contributor. Los administradores deben preparar ese acceso una sola vez; esta entrega no lo pudo verificar en vivo.
 
 ## Un único procedimiento del operador
 
 Preparación única: integrar los PR revisados #18 y el de infraestructura; Python **3.11+**, Terraform **1.9+**, Azure CLI, Databricks CLI moderno (esquema comprobado con 0.275.0), `winpty` de Git for Windows y herramientas de construcción wheel. Instalar `automation/silver/requirements.txt` y las dependencias existentes de `adf/tools/requirements-commit.txt`; ODBC Driver 18 y el SQL Server local deben estar disponibles. El cliente local no necesita ejecutar Spark ni disponer de un cluster existente.
 
-Preparar las sesiones Azure CLI y OAuth de cuenta antes de empezar; el perfil de cuenta debe corresponder al administrador autorizado. No pasar PATs ni contraseñas a flags/variables Bash. El launcher rechaza DATABRICKS_TOKEN en el entorno. El acceso workspace usa Azure CLI con ARM resource ID, sin escribir tokens en Terraform ni construir un `.databrickscfg` con secretos.
+Preparar Azure CLI para la etapa workspace; OAuth de cuenta solo es requisito para `--stage all`; el perfil de cuenta debe corresponder al administrador autorizado. No pasar PATs ni contraseñas a flags/variables Bash. El launcher rechaza DATABRICKS_TOKEN en el entorno. El acceso workspace usa Azure CLI con ARM resource ID, sin escribir tokens en Terraform ni construir un `.databrickscfg` con secretos.
 
 Desde la raíz del repositorio en **Windows/Git Bash**:
 
 ```bash
-winpty python automation/silver/launch.py --config work/silver-dev.json --deploy
+winpty python automation/silver/launch.py --stage all --config work/silver-dev.json --deploy
 ```
 
-La primera vez solicita juntos Account ID, nombre del perfil OAuth, UPN del operador y si se permite **proponer** un metastore nuevo cuando no exista. Guarda solo valores no secretos en `work/silver-dev.json`, ignorado por Git. También puede prepararse a partir de `config.example.json`. Opciones como `metastore_id`/`node_type_id` se revisan en ese archivo; no se inventan IDs. Las llamadas nativas se hacen desde Python con argv, sin interpolación de shell ni conversión MSYS de los paths `/api` y `/Volumes`.
+En `--stage all`, si faltan, solicita juntos Account ID, nombre del perfil OAuth, UPN del operador y si se permite **proponer** un metastore nuevo cuando no exista. Guarda solo valores no secretos en `work/silver-dev.json`, ignorado por Git. También puede prepararse a partir de `config.example.json`. Opciones como `metastore_id`/`node_type_id` se revisan en ese archivo; no se inventan IDs. Las llamadas nativas se hacen desde Python con argv, sin interpolación de shell ni conversión MSYS de los paths `/api` y `/Volumes`.
 
 El mismo proceso:
 
-1. Comprueba cuenta/suscripción, RP, acceso de cuenta y descubrimiento regional; valida que el estado original exista y apunte al RG/ADLS indicados. Nunca bootstrappea una plataforma nueva si falta el estado.
+1. Comprueba tenant/suscripción y RP, sin exigir acceso de cuenta para la etapa Azure; valida que el estado original exista y apunte al RG/ADLS indicados. Nunca bootstrappea una plataforma nueva si falta el estado.
 2. Inicializa/valida el root existente y guarda su plan binario. Genera un archivo legible y resumen de cambios. Rechaza **todo destroy/replace**, importación implícita, cambios de recursos protegidos y privilegios no permitidos. Solicita `APPLY-PLATFORM <sha256>` después de indicar el archivo revisable. Aplica **ese mismo plan**, comprobando nuevamente su SHA256; sin aprobación no aplica.
 3. Con el workspace disponible descubre nuevamente metastore/asignación, valida identidad del operador, planifica UC en su clave separada y solicita `APPLY-UC <sha256>`. Mantiene las decisiones leyendo los recursos del estado en reintentos (también tras un apply parcial sin outputs calculados), para no proponer borrar una asignación/registro/metastore que creó previamente. Bloquea un SP homónimo no perteneciente a ese estado en vez de duplicarlo.
 4. Verifica metastore, tipos de nodo/runtime y grants de entrada. El propio Job comprobará paths/contenido/UC bajo RUN AS, no solo bajo el operador.
@@ -64,7 +64,7 @@ El mismo proceso:
 7. Publica el JSON en el volumen protegido sin sobrescribir. Si ya existe, descarga y exige bytes idénticos antes de reutilizarlo; una diferencia bloquea para investigación. Despliega el único Job; concede CAN_READ al runner solamente en su carpeta propia de notebook/wheel (no en el home del operador), y lo ejecuta una vez, sin schedule/retries automáticos. Timeout 2 horas, una ejecución simultánea, sin workers adicionales. El cómputo se termina al finalizar/cancelar.
 8. Obtiene el resultado terminal y salida del task. Solo acepta SUCCESS + once fuentes exactas + cero rechazos + `replay_verified=true` y métricas completas. El replay lo ejecuta el notebook de #18 sin nuevas escrituras Delta. Genera `work/silver-deployment/acceptance.json` con RunId, métricas/versiones/digest; **solo después de evidencia real**. No simula aceptación si falla una API, tarea o permiso.
 
-Omitir `--deploy` genera planes y revisiones, **sin applies ni deploy/run**. Si el workspace no existe, el plan UC queda explícitamente diferido: no puede verificarse contra un proveedor cuyo workspace todavía no existe. Incluso en modo plan se requieren acceso real y estado; esta entrega solo ejecutó validación/mocks sin backend.
+Omitir `--deploy` genera planes y revisiones, **sin applies ni deploy/run**. La etapa predeterminada es `workspace`: no requiere cuenta/CLI Databricks ni ejecuta UC/SQL/Job. Para continuar todo el flujo se debe elegir explícitamente `--stage all`. Si el workspace no existe, el plan UC queda explícitamente diferido: no puede verificarse contra un proveedor cuyo workspace todavía no existe. Incluso en modo plan se requieren acceso real y estado; esta entrega solo ejecutó validación/mocks sin backend.
 
 No se graban tokens/contraseñas. Los archivos de plan/estado/metadatos y recibos son privados en `work/`, fuera de Git y de artifacts CI. Proteger la carpeta con ACL del usuario en Windows (chmod no sustituye ACL NTFS). Los errores de comandos se resumen sin volcar mensajes crudos que puedan contener secretos; usar la etapa, códigos y las revisiones privadas para investigar. No publicar salidas completas de providers/SDK sin revisar.
 
@@ -84,4 +84,4 @@ Localmente el overlay también se comprobó contra el JSON Schema oficial Databr
 
 **Limitación de entrega:** no hay credenciales Azure/Databricks ni acceso al backend real en este entorno. No se generó un plan real contra `dev/platform.tfstate`; no puede certificarse ausencia de drift real. Sí se comprobó que el backend/direcciones existentes permanecen intactos y que el launcher rechaza planes destructivos/protegidos antes de aplicar. La comprobación final de cero destrucciones/reemplazos ocurre en los planes reales del operador. No se ejecutaron apply, ADF, R2, despliegue ni aceptación Azure.
 
-Resultado local de esta entrega: **38 pruebas Python y 8 casos Terraform con proveedores mock aprobados**; además 83 regresiones offline Bronze (63 pytest y 20 ADF). Las 18 integraciones SQL se omitieron en el run normal. Ninguna prueba representa una ejecución real de Azure/Databricks.
+Resultado de la entrega de infraestructura original: **38 pruebas Python y 8 casos Terraform con proveedores mock aprobados**; además 83 regresiones offline Bronze (63 pytest y 20 ADF). Las 18 integraciones SQL se omitieron en el run normal. Ninguna prueba representa una ejecución real de Azure/Databricks.

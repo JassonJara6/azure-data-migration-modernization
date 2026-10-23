@@ -3,7 +3,7 @@ on:
   pull_request:
     paths: ['terraform/**', 'automation/silver/**', '.github/workflows/databricks-infrastructure-tests.yml']
   push:
-    branches: ['feature/databricks-infrastructure']
+    branches: ['feature/databricks-infrastructure', 'feature/databricks-identity-bootstrap']
     paths: ['terraform/**', 'automation/silver/**', '.github/workflows/databricks-infrastructure-tests.yml']
 permissions:
   contents: read

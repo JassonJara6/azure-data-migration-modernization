@@ -1,7 +1,7 @@
 {
   "account_id": "REQUIRED_DATABRICKS_ACCOUNT_UUID",
   "account_profile": "admm-account",
-  "subscription_id": null,
+  "subscription_id": "b3d627f1-966e-4bd4-861a-e606b963875d",
   "operator_user_name": "REQUIRED_AUTHORIZED_USER_UPN",
   "catalog_name": "admm_dev",
   "metastore_id": null,
@@ -9,5 +9,6 @@
   "node_type_id": "Standard_D4ds_v5",
   "parent_run_id": "20d65511-8190-41a0-8ad2-23d7568363d2",
   "sql_server": "127.0.0.1,1433",
-  "sql_user": "bronze_reconciler"
+  "sql_user": "bronze_reconciler",
+  "tenant_id": "2c60929f-5f02-4969-8e91-62fdac1de9d4"
 }

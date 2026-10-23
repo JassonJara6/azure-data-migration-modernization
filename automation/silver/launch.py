@@ -52,6 +52,13 @@ def uuid(value):
     return value
 
 
+def state_resources(state):
+    def walk(module):
+        for resource in module.get('resources',[]):yield resource['address'],resource.get('values',{})
+        for child in module.get('child_modules',[]):yield from walk(child)
+    return dict(walk(state.get('values',{}).get('root_module',{})))
+
+
 def choose_metastore(response,selected=None,allow_create=False):
     entries=[m.get('metastore_info',m) for m in response.get('metastores',[])]
     regional=[m for m in entries if m.get('region','').lower().replace(' ','')=='eastus']
@@ -146,17 +153,24 @@ class Launcher:
             print(json.dumps({'status':'PLAN_ONLY','uc_plan':'DEFERRED_UNTIL_WORKSPACE_EXISTS'}));return None
         self.ws_env=dict(self.env,DATABRICKS_HOST=workspace['workspace_host'],DATABRICKS_AUTH_TYPE='azure-cli',
                         DATABRICKS_AZURE_RESOURCE_ID=workspace['workspace_resource_id'])
-        self.init(UC);previous=self.outputs(UC).get('deployment',{}).get('value',{})
+        self.init(UC)
+        owned=state_resources(self.tf(UC,'show','-json',json_output=True))
         # Azure may auto-enable UC while creating the workspace. Re-discover
         # regional metastores before ever proposing a new shared object.
         self.metastores=self.account_api('get',f'/api/2.0/accounts/{self.c["account_id"]}/metastores')
         selected,create=choose_metastore(self.metastores,self.c.get('metastore_id'),self.c.get('allow_create_metastore',False))
-        if previous.get('created_metastore'):
-            require(selected==previous['metastore_id'],'REGIONAL_METASTORE_CHANGED');selected=None;create=True
+        owned_meta=owned.get('databricks_metastore.regional[0]')
+        if owned_meta:
+            require(selected==owned_meta['id'],'REGIONAL_METASTORE_CHANGED');selected=None;create=True
         assigned=self.assignment_for(workspace['workspace_id'])
-        selected_effective=selected or previous.get('metastore_id')
+        selected_effective=selected or (owned_meta or {}).get('id')
         if assigned:require(assigned.get('metastore_id')==selected_effective,'EXISTING_ASSIGNMENT_MISMATCH')
-        manage=previous.get('manages_assignment',False) or assigned is None
+        manage='databricks_metastore_assignment.workspace[0]' in owned or assigned is None
+        if 'databricks_service_principal.runner' not in owned:
+            name=self.c.get('catalog_name','admm_dev')+'-silver-job'
+            query=urllib.parse.quote('displayName eq \"'+name+'\"',safe='')
+            matches=self.account_api('get',f'/api/2.0/accounts/{self.c["account_id"]}/scim/v2/ServicePrincipals?filter='+query)
+            require(matches.get('totalResults',len(matches.get('Resources',[])))==0,'UNOWNED_RUNNER_PRINCIPAL_ALREADY_EXISTS')
         variables=dict(account_id=self.c['account_id'],account_profile=self.c.get('account_profile','admm-account'),
             workspace_host=workspace['workspace_host'],workspace_id=str(workspace['workspace_id']),
             workspace_resource_id=workspace['workspace_resource_id'],access_connector_id=workspace['access_connector_id'],

@@ -32,7 +32,7 @@ data "databricks_user" "operator" {
 }
 resource "databricks_service_principal" "runner" {
   provider     = databricks.account
-  display_name = "admm-dev-silver-job"
+  display_name = "${var.catalog_name}-silver-job"
 }
 resource "databricks_mws_permission_assignment" "runner" {
   provider     = databricks.account

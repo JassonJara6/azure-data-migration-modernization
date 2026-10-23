@@ -256,3 +256,15 @@ def test_deployment_approval_covers_notebook_code(tmp_path):
     (tmp_path/'dist').mkdir();(tmp_path/'dist/code.whl').write_bytes(b'synthetic artifact')
     before=deployment_sha(tmp_path);notebook.write_text('# edited after approval')
     assert deployment_sha(tmp_path)!=before
+
+
+def test_partial_uc_state_can_be_recovered_without_outputs():
+    from launch import state_resources
+    # Terraform may not persist computed outputs after a failed partial apply.
+    state={'values':{'root_module':{'resources':[
+      {'address':'databricks_metastore.regional[0]','values':{'id':'regional'}},
+      {'address':'databricks_metastore_assignment.workspace[0]','values':{'metastore_id':'regional'}}]}}}
+    owned=state_resources(state)
+    assert owned['databricks_metastore.regional[0]']['id']=='regional'
+    assert 'databricks_metastore_assignment.workspace[0]' in owned
+    assert state_resources({'format_version':'1.0'})=={}

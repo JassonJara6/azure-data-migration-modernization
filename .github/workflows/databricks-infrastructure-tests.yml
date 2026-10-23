@@ -1,0 +1,41 @@
+name: Databricks infrastructure offline checks
+on:
+  pull_request:
+    paths: ['terraform/**', 'automation/silver/**', '.github/workflows/databricks-infrastructure-tests.yml']
+  push:
+    branches: ['feature/databricks-infrastructure']
+    paths: ['terraform/**', 'automation/silver/**', '.github/workflows/databricks-infrastructure-tests.yml']
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.8'
+          terraform_wrapper: false
+      - run: python -m pip install -r automation/silver/requirements.txt
+      - run: terraform fmt -check -recursive terraform/environments/dev terraform/modules/databricks_workspace terraform/databricks/dev
+      - name: Validate existing platform without initializing the real backend
+        run: |
+          terraform -chdir=terraform/environments/dev init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=terraform/environments/dev validate
+          terraform -chdir=terraform/environments/dev test -no-color
+      - name: Validate workspace module with mock plans only
+        run: |
+          terraform -chdir=terraform/modules/databricks_workspace init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=terraform/modules/databricks_workspace validate
+          terraform -chdir=terraform/modules/databricks_workspace test -no-color
+      - name: Validate UC without account credentials or remote state
+        run: |
+          terraform -chdir=terraform/databricks/dev init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=terraform/databricks/dev validate
+          terraform -chdir=terraform/databricks/dev test -no-color
+      - run: python -m pytest -q automation/silver/tests
+      - run: python -m compileall -q automation/silver

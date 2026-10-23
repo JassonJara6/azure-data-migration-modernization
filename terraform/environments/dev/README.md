@@ -1,6 +1,6 @@
 # Dev platform Terraform root
 
-This directory is the Terraform root for the `admm` development platform in East US. It currently manages the platform resource group, an ADLS Gen2 account with five filesystem boundaries, an empty Azure Data Factory with least-privilege access to Bronze, the Azure-side Self-hosted Integration Runtime (SHIR), and a Key Vault for future SQL connection secrets. It does not create pipelines, datasets, linked services, triggers, Databricks, or networking resources.
+This directory is the Terraform root for the `admm` development platform in East US. It currently manages the platform resource group, an ADLS Gen2 account with five filesystem boundaries, an empty Azure Data Factory with least-privilege access to Bronze, the Azure-side Self-hosted Integration Runtime (SHIR), and a Key Vault for future SQL connection secrets. It does not create pipelines, datasets, linked services or triggers. An opt-in Databricks workspace extension and staged UC/Job automation are described below.
 
 ## Remote backend and authentication
 
@@ -107,3 +107,9 @@ terraform -chdir=terraform/environments/dev show dev.tfplan
 With the existing platform and SHIR already deployed, review that the plan adds exactly one `azurerm_key_vault` and one vault-scoped `azurerm_role_assignment`, with no changes to Data Factory, SHIR, Storage, containers, or existing Bronze RBAC. Confirm the role is `Key Vault Secrets User`, its principal is the existing Data Factory identity, and its scope is the new vault ID. The plan must contain no secret resources or values, bootstrap changes, or unrelated services. Do not run `apply` until the plan is approved.
 
 After a future approved deployment, the outputs can be inspected with `terraform -chdir=terraform/environments/dev output`. Generated state, plans, local variable files, and `.terraform/` content remain ignored by Git; `.terraform.lock.hcl` should remain committed.
+
+## Optional Silver deployment
+
+`databricks.tf` adds the workspace/Access Connector only with `enable_databricks=true`. Existing backend key and resource addresses remain intact. Resource-provider auto-registration is disabled to keep planning free of implicit Azure registration; a missing Microsoft.Databricks registration is a separately declared, approved resource. Existing AzureRM stays locked at 4.81.0.
+
+Use the [single Windows/Git Bash deployment procedure](../../../automation/silver/README.md), including account-admin/UC prerequisites, saved-plan approvals, new UC state key in the same backend, ephemeral Job compute, costs and cancellation. Do not apply a newly empty platform state or use `-target`. A real protected-resource drift must be resolved explicitly; the launcher refuses it.

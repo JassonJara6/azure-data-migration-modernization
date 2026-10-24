@@ -204,7 +204,7 @@ def test_bootstrap_config_resumes_account_wizard_without_overwriting_settings(tm
     monkeypatch.setattr(launch, 'ROOT', tmp_path)
     path = tmp_path / 'work/config.json'; path.parent.mkdir()
     path.write_text(json.dumps({'account_id': None, 'operator_user_name': None,
-        'node_type_id': 'Standard_D4as_v5', 'tenant_id': doctor.TENANT, 'metastore_id': 'existing'}))
+        'node_type_id': 'Standard_D4as_v5', 'tenant_id': doctor.TENANT, 'metastore_id': 'existing', 'uc_mode':'account'}))
     replies = iter([doctor.TENANT, '', 'operator@example.invalid', ''])
     monkeypatch.setattr('builtins.input', lambda _: next(replies))
     c = launch.load_config(path)
@@ -248,7 +248,8 @@ def test_workspace_default_main_does_not_run_silver(monkeypatch, tmp_path):
             pytest.fail('No SQL/Job invocation')
     monkeypatch.setattr(launch, 'Launcher', WorkspaceOnly)
     assert launch.main() == 0
-    assert seen == [{'workspace_only': True}]
+    assert len(seen)==1 and seen[0]['workspace_only'] is True
+    assert all(v is None for v in seen[0]['overrides'].values())
 
 
 def test_tf_error_identifies_stage_without_disclosing_output(monkeypatch):

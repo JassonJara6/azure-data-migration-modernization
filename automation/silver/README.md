@@ -1,5 +1,7 @@
 # Puesta en marcha Silver — infraestructura y automatización
 
+**Workspace y metastore ya desplegados:** usar la [ruta UC con perfil workspace](UNITY-CATALOG-WORKSPACE.md), sin Account ID/Account Admin para preparar UC. Sus comandos `--stage uc` y `--stage silver` prevalecen sobre la ruta histórica de cuenta descrita más abajo. El Job conserva la validación de su principal y RUN AS.
+
 Silver y la infraestructura están fusionados en `main`. La **[guía única de bootstrap y diagnóstico](BOOTSTRAP.md)** gobierna el orden de puesta en marcha y los bloqueos de identidad. Este documento conserva el detalle de infraestructura, seguridad, costos y ejecución del Job. No se realizan merges, cherry-picks ni checkout automático de código remoto.
 
 Contexto fijado: RG `rg-admm-dev-platform`, East US, ADLS `stadmmdevdlf6d99ba4`, filesystem Bronze existente, parent `20d65511-8190-41a0-8ad2-23d7568363d2`. Su COMMITTED de once cargas es evidencia comunicada por el operador; esta entrega no lo volvió a consultar. R2/ADF no se ejecutan.

@@ -14,7 +14,7 @@ Azure Data Factory ──► ADLS Gen2 / Bronze ──► Databricks / Silver �
                               raw                  validated              dimensional
 ```
 
-For the first real Silver deployment, follow the [identity diagnosis and staged Databricks bootstrap guide](automation/silver/BOOTSTRAP.md). Azure workspace planning is independent of Databricks Account Console; account/Unity Catalog privileges remain explicit prerequisites for Silver.
+For the deployed workspace and assigned metastore, follow [Unity Catalog and Silver through the workspace profile](automation/silver/UNITY-CATALOG-WORKSPACE.md). UC foundation uses delegated workspace/UC privileges without Account Console or mandatory Account ID; the Job still requires an existing service principal and verified RUN AS delegation. The [identity/bootstrap guide](automation/silver/BOOTSTRAP.md) covers initial Azure setup.
 
 Existing Bronze uses Azure Key Vault and published Linked Services. Silver uses Unity Catalog identities and volumes, without embedded credentials. GitHub Actions tests Bronze and Silver locally; this repository does not automatically deploy them to Azure.
 

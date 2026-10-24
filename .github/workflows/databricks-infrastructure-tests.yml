@@ -3,7 +3,7 @@ on:
   pull_request:
     paths: ['terraform/**', 'automation/silver/**', '.github/workflows/databricks-infrastructure-tests.yml']
   push:
-    branches: ['feature/databricks-infrastructure', 'feature/databricks-identity-bootstrap']
+    branches: ['feature/databricks-infrastructure', 'feature/databricks-identity-bootstrap', 'feature/unity-catalog-workspace-bootstrap']
     paths: ['terraform/**', 'automation/silver/**', '.github/workflows/databricks-infrastructure-tests.yml']
 permissions:
   contents: read
@@ -21,7 +21,7 @@ jobs:
           terraform_version: '1.9.8'
           terraform_wrapper: false
       - run: python -m pip install -r automation/silver/requirements.txt
-      - run: terraform fmt -check -recursive terraform/environments/dev terraform/modules/databricks_workspace terraform/databricks/dev
+      - run: terraform fmt -check -recursive terraform/environments/dev terraform/modules/databricks_workspace terraform/databricks/dev terraform/databricks/workspace
       - name: Validate existing platform without initializing the real backend
         run: |
           terraform -chdir=terraform/environments/dev init -backend=false -input=false -lockfile=readonly
@@ -37,5 +37,10 @@ jobs:
           terraform -chdir=terraform/databricks/dev init -backend=false -input=false -lockfile=readonly
           terraform -chdir=terraform/databricks/dev validate
           terraform -chdir=terraform/databricks/dev test -no-color
+      - name: Validate workspace-only UC without account provider or remote state
+        run: |
+          terraform -chdir=terraform/databricks/workspace init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=terraform/databricks/workspace validate
+          terraform -chdir=terraform/databricks/workspace test -no-color
       - run: python -m pytest -q automation/silver/tests
       - run: python -m compileall -q automation/silver

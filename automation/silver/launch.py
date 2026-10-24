@@ -18,16 +18,21 @@ import yaml
 from plan_guard import Blocked,require,review,sha
 from bundle_overlay import ephemeral_bundle
 from diagnose import diagnose, safe_failure, SUBSCRIPTION, TENANT
+from workspace_uc import ensure_workspace_state, profile_environment, verify_assignment, verify_runner, verify_run_as
 
 ROOT=Path(__file__).resolve().parents[2]
 PLATFORM=ROOT/'terraform/environments/dev'
 UC=ROOT/'terraform/databricks/dev'
+UC_WORKSPACE=ROOT/'terraform/databricks/workspace'
 PARENT='20d65511-8190-41a0-8ad2-23d7568363d2'
 SOURCES={'Person.Person','Person.Address','Person.StateProvince','Person.CountryRegion','Production.Product','Production.ProductCategory','Production.ProductSubcategory','Sales.Customer','Sales.SalesOrderHeader','Sales.SalesOrderDetail','Sales.SalesTerritory'}
 
 
 def command(args,*,cwd=ROOT,env=None,json_output=False,allowed=(0,),interactive=False):
     # Never echo raw external error output: SDK/CLI messages may contain tokens.
+    args=list(args)
+    if str(args[0])=='databricks' and env and env.get('DATABRICKS_CONFIG_PROFILE') and '--profile' not in args:
+        args+=['--profile',env['DATABRICKS_CONFIG_PROFILE']]
     program=shutil.which(str(args[0])) or str(args[0])
     try:
         result=subprocess.run([program,*map(str,args[1:])],cwd=cwd,env=env,
@@ -147,7 +152,7 @@ class Launcher:
             self.tf(root,'apply','-input=false',str(saved))
         return not changes or self.deploy
     def provision(self):
-        if self.deploy and getattr(self,"stage","all")=="all":
+        if self.deploy and getattr(self,"stage","all") in ('all','silver'):
             require((ROOT/'databricks/silver/databricks.yml').is_file() and
                     (ROOT/'databricks/silver/tools/export_committed_parent.py').is_file(),'PR18_REQUIRED_BEFORE_DEPLOY')
         self.init(PLATFORM)
@@ -157,9 +162,14 @@ class Launcher:
         require(old['resource_group_name']['value']=='rg-admm-dev-platform' and
                 old['storage_account_name']['value']=='stadmmdevdlf6d99ba4','PLATFORM_IDENTITY_MISMATCH')
         register=self.register_provider or 'module.databricks[0].azurerm_resource_provider_registration.databricks[0]' in state
-        applied=self.plan(PLATFORM,'platform',{'enable_databricks':True,'register_databricks_provider':register})
+        if getattr(self,'stage','all') in ('uc','silver'):
+            applied=True # Existing workspace only; do not plan/apply Azure resources.
+        else:
+            applied=self.plan(PLATFORM,'platform',{'enable_databricks':True,'register_databricks_provider':register})
         values=self.outputs(PLATFORM)
         workspace=values.get('silver_workspace',{}).get('value')
+        if not workspace and getattr(self,'stage','all') in ('uc','silver'):
+            raise Blocked('EXISTING_WORKSPACE_OUTPUT_REQUIRED_NO_AZURE_BOOTSTRAP')
         if not applied or not workspace:
             reason='DEFERRED_UNTIL_PLATFORM_PLAN_APPLIED' if not applied else 'DEFERRED_UNTIL_WORKSPACE_OUTPUT_EXISTS'
             print(json.dumps({'status':'PLAN_ONLY','uc_plan':reason}));return None
@@ -167,12 +177,18 @@ class Launcher:
             print(json.dumps({'status':'WORKSPACE_STAGE_COMPLETE','uc':'NOT_CONFIGURED_OR_VERIFIED',
                               'silver':'NOT_DEPLOYED','next':'Configure authorized Databricks account OAuth, then rerun --stage all'}))
             return None
+        if self.c.get('uc_mode','account')=='workspace':
+            return self.provision_workspace_uc(workspace)
         uuid(self.c.get('account_id'))
         require('@' in self.c.get('operator_user_name',''),'OPERATOR_UPN_REQUIRED')
         self.ws_env=dict(self.env,DATABRICKS_HOST=workspace['workspace_host'],DATABRICKS_AUTH_TYPE='azure-cli',
                         DATABRICKS_AZURE_RESOURCE_ID=workspace['workspace_resource_id'])
         self.init(UC)
-        owned=state_resources(self.tf(UC,'show','-json',json_output=True))
+        current_state=self.tf(UC,'show','-json',json_output=True)
+        owned=state_resources(current_state)
+        mode=current_state.get('values',{}).get('outputs',{}).get('deployment',{}).get('value',{}).get('provisioning_mode')
+        require(mode!='workspace' and 'data.databricks_current_metastore.assigned' not in owned and not any(k.endswith('[0]') and k.startswith('databricks_cluster_policy.') for k in owned),
+                'WORKSPACE_MANAGED_UC_STATE_USE_WORKSPACE_MODE')
         # Azure may auto-enable UC while creating the workspace. Re-discover
         # regional metastores before ever proposing a new shared object.
         self.metastores=self.account_api('get',f'/api/2.0/accounts/{self.c["account_id"]}/metastores')
@@ -199,6 +215,42 @@ class Launcher:
         if not self.plan(UC,'uc',variables):return None
         output=self.outputs(UC)['deployment']['value']
         self.check_workspace(output)
+        if getattr(self,'stage','all')=='uc':return None
+        return workspace,output
+    def provision_workspace_uc(self,workspace):
+        require(not self.c.get('allow_create_metastore',False),'WORKSPACE_MODE_CANNOT_CREATE_METASTORE')
+        require(self.c.get('metastore_id'),'EXISTING_METASTORE_ID_REQUIRED_USE_METASTORE_ID_OPTION')
+        selected=uuid(self.c.get('metastore_id'))
+        profile=self.c.get('workspace_profile') or 'admm-workspace'
+        self.ws_env=profile_environment(self.env,profile,workspace)
+        operator=verify_assignment(self.api,workspace,selected,self.c.get('operator_user_name'))
+        runner=self.c.get('runner_application_id')
+        if runner:uuid(runner);verify_runner(self.api,runner)
+        if self.deploy and self.stage!='uc':
+            require(runner,'SILVER_EXISTING_RUNNER_REQUIRED_USE_STAGE_UC_FOR_FOUNDATION')
+            account=self.c.get('account_id')
+            if account:uuid(account)
+            verify_run_as(self.api,account,runner,operator)
+        variables=dict(workspace_host=workspace['workspace_host'],workspace_id=str(workspace['workspace_id']),
+            workspace_resource_id=workspace['workspace_resource_id'],access_connector_id=workspace['access_connector_id'],
+            storage_account_name=workspace['storage_account_name'],operator_user_name=operator,
+            metastore_id=selected,workspace_profile=profile,runner_application_id=runner,
+            catalog_name=self.c.get('catalog_name','admm_dev'),node_type_id=self.c.get('node_type_id','Standard_D4ds_v5'))
+        original_env=self.env
+        self.env=self.ws_env # Same selected CLI profile for all workspace Terraform commands.
+        try:
+            self.init(UC_WORKSPACE)
+            ensure_workspace_state(state_resources(self.tf(UC_WORKSPACE,'show','-json',json_output=True)),operator)
+            applied=self.plan(UC_WORKSPACE,'uc-workspace',variables)
+            output=self.outputs(UC_WORKSPACE)['deployment']['value'] if applied else None
+        finally:self.env=original_env
+        if not applied:return None
+        if not runner:
+            print(json.dumps({'status':'UC_FOUNDATION_CONFIGURED','silver':'BLOCKED_EXISTING_RUNNER_AND_RUN_AS_DELEGATION_REQUIRED'}))
+            return None
+        self.check_workspace(output)
+        if self.stage=='uc':
+            print(json.dumps({'status':'UC_CONFIGURED','silver':'NOT_DEPLOYED_RUN_AS_NOT_VERIFIED'}));return None
         return workspace,output
     def assignment_for(self,workspace_id):
         # List assignments on known metastores: no heuristic 404 handling and
@@ -304,7 +356,7 @@ class Launcher:
         acl=json.dumps({'access_control_list':[{'service_principal_name':uc['runner_application_id'],'permission_level':'CAN_READ'}]})
         command(['databricks','permissions','update','directories',str(folder['object_id']),'--json',acl],env=self.ws_env)
         submitted=command(['databricks','jobs','run-now',str(job_id),'--no-wait','--output','json'],env=self.ws_env,json_output=True)
-        run_id=submitted['run_id'];(self.work/'last-run.json').write_text(json.dumps({'run_id':run_id,'job_id':job_id,'host':workspace['workspace_host'],'workspace_resource_id':workspace['workspace_resource_id']}))
+        run_id=submitted['run_id'];(self.work/'last-run.json').write_text(json.dumps({'run_id':run_id,'job_id':job_id,'host':workspace['workspace_host'],'workspace_resource_id':workspace['workspace_resource_id'],'workspace_profile':(self.c.get('workspace_profile') or 'admm-workspace') if self.c.get('uc_mode')=='workspace' else None}))
         deadline=time.monotonic()+7500
         while True:
             run=self.api('get','/api/2.1/jobs/runs/get?run_id='+str(run_id))
@@ -324,16 +376,20 @@ class Launcher:
         print(json.dumps(acceptance,indent=2))
 
 
-def load_config(path,workspace_only=False):
+def load_config(path,workspace_only=False,overrides=None):
     path=Path(path).resolve()
     require(path.is_relative_to(ROOT/'work') and path.suffix=='.json','PRIVATE_CONFIG_PATH_REQUIRED')
     existed=path.exists()
     config=json.loads(path.read_text()) if existed else json.loads((ROOT/'automation/silver/config.example.json').read_text())
+    config.update({k:v for k,v in (overrides or {}).items() if v is not None})
+    mode=config.get('uc_mode','workspace')
+    require(mode in ('workspace','account'),'INVALID_UC_MODE')
+    config['uc_mode']=mode
     if workspace_only:
         if not existed:
             config['account_id']=None;config['operator_user_name']=None
             config['subscription_id']=SUBSCRIPTION;config['tenant_id']=TENANT
-    elif not existed or not config.get('account_id') or not config.get('operator_user_name'):
+    elif mode=='account' and (not existed or not config.get('account_id') or not config.get('operator_user_name')):
         print('Configuración de cuenta (sin contraseñas): Account ID, perfil OAuth y operador autorizado.')
         config['account_id']=uuid(input('Databricks Account ID: ').strip())
         config['account_profile']=input('Perfil OAuth de cuenta [admm-account]: ').strip() or 'admm-account'
@@ -353,7 +409,11 @@ def main():
     parser.add_argument('--diagnose',action='store_true',help='Read-only Azure identity/context/RBAC diagnosis; no login prompts or Terraform')
     parser.add_argument('--graph',action='store_true',help='Optional directory/security-defaults checks; requires existing delegated permissions')
     parser.add_argument('--correlation-id',help='Optional Entra sign-in correlation UUID; requires --graph and AuditLog.Read.All')
-    parser.add_argument('--stage',choices=('workspace','all'),default='workspace',help='workspace excludes all Databricks account/UC/Job operations')
+    parser.add_argument('--stage',choices=('workspace','uc','silver','all'),default='workspace',help='workspace excludes all Databricks account/UC/Job operations')
+    parser.add_argument('--uc-mode',choices=('workspace','account'),help='workspace reuses UC assignment and existing identities; account retains legacy admin path')
+    parser.add_argument('--workspace-profile',help='Existing OAuth workspace profile, e.g. admm-workspace')
+    parser.add_argument('--metastore-id',help='Explicit existing assigned metastore UUID')
+    parser.add_argument('--runner-application-id',help='Existing workspace service principal UUID; no identities are created')
     parser.add_argument('--deploy',action='store_true',help='Request saved-plan and deployment approvals interactively')
     parser.add_argument('--stop',action='store_true',help='Cancel only the last recorded Silver run')
     args=parser.parse_args()
@@ -371,10 +431,14 @@ def main():
         if args.stop:
             last=json.loads((ROOT/'work/silver-deployment/last-run.json').read_text())
             env=dict(os.environ,DATABRICKS_HOST=last['host'],DATABRICKS_AUTH_TYPE='azure-cli',DATABRICKS_AZURE_RESOURCE_ID=last['workspace_resource_id'])
+            if last.get('workspace_profile'):env=profile_environment(os.environ,last['workspace_profile'],{'workspace_host':last['host']})
             command(['databricks','jobs','cancel-run',str(last['run_id']),'--no-wait'],env=env);return 0
-        launch=Launcher(load_config(args.config,workspace_only=args.stage=="workspace"),args.deploy,stage=args.stage)
+        config=load_config(args.config,workspace_only=args.stage=="workspace",overrides={
+            'uc_mode':args.uc_mode,'workspace_profile':args.workspace_profile,'metastore_id':args.metastore_id,
+            'runner_application_id':args.runner_application_id})
+        launch=Launcher(config,args.deploy,stage=args.stage)
         deployed=launch.provision()
-        if deployed and args.deploy:launch.deploy_job(*deployed)
+        if deployed and args.deploy and args.stage in ('all','silver'):launch.deploy_job(*deployed)
         return 0
     except KeyboardInterrupt:
         print('INTERRUPTED: use --stop to cancel a recorded running Job.',file=sys.stderr);return 130

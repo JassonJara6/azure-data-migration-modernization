@@ -151,7 +151,7 @@ def test_config_wizard_never_stores_passwords(tmp_path,monkeypatch):
     source.joinpath('config.example.json').write_text((ROOT/'automation/silver/config.example.json').read_text())
     replies=iter(['00000000-0000-0000-0000-000000000001','','operator@example.invalid',''])
     monkeypatch.setattr('builtins.input',lambda _:next(replies))
-    config=launch.load_config(tmp_path/'work/config.json')
+    config=launch.load_config(tmp_path/'work/config.json',overrides={'uc_mode':'account'})
     assert config['allow_create_metastore'] is False
     assert not any(key in config for key in ('password','token','client_secret'))
     with pytest.raises(Blocked):launch.load_config(tmp_path/'tracked-config.json')

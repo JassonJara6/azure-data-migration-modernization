@@ -1,5 +1,7 @@
 # Desbloqueo de identidad y primera ejecución Silver
 
+**Actualización:** para el workspace/metastore ya existentes, continuar con [Unity Catalog mediante `admm-workspace`](UNITY-CATALOG-WORKSPACE.md). No es necesario resolver Account Console para aprovisionar los objetos UC con los permisos delegados. La ruta de cuenta de esta guía es histórica y ahora requiere `--uc-mode account` explícito; RUN AS del Job sigue teniendo controles independientes.
+
 Guía de ejecución vigente. Silver y su infraestructura ya están fusionados en `main`. Este cambio separa diagnóstico, bootstrap Azure y configuración Databricks; no ejecuta despliegues. El parent Bronze comunicado por el operador sigue siendo `20d65511-8190-41a0-8ad2-23d7568363d2`, COMMITTED con once cargas. R2 permanece pendiente y **no se ejecuta como parte de Silver**.
 
 ## Diagnóstico técnico y límites

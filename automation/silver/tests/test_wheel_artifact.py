@@ -114,3 +114,13 @@ def test_real_wheel_is_reproducible_and_contains_only_current_package(tmp_path):
     with zipfile.ZipFile(second) as wheel:
         assert 'admm_silver/contract.json' in wheel.namelist()
         assert not any('obsolete' in name for name in wheel.namelist())
+
+
+def test_replaced_manifest_cannot_select_an_older_exact_wheel(tmp_path):
+    stage=tmp_path/'bundle';(stage/'dist/fresh').mkdir(parents=True)
+    fresh=stage/'dist/fresh/current.whl';fresh.write_bytes(b'fresh')
+    old=stage/'dist/old.whl';old.write_bytes(b'old')
+    config=spec();artifact.pin_wheel(config,stage,old) # Synthetic stale-manifest replacement.
+    (stage/'databricks.yml').write_text(yaml.safe_dump(config))
+    with pytest.raises(Blocked,match='FRESH_WHEEL_SELECTION_CHANGED'):
+        launch.deployment_sha(stage,expected_wheel=fresh)

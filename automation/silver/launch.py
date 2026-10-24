@@ -49,9 +49,11 @@ def command(args,*,cwd=ROOT,env=None,json_output=False,allowed=(0,),interactive=
     return json.loads(result.stdout) if json_output else result.stdout
 
 
-def deployment_sha(stage):
+def deployment_sha(stage,*,expected_wheel=None):
     spec=yaml.safe_load((stage/'databricks.yml').read_text())
     wheel=selected_wheel(stage,spec)
+    if expected_wheel is not None:
+        require(wheel==expected_wheel.resolve(),'FRESH_WHEEL_SELECTION_CHANGED')
     paths=[stage/'databricks.yml',stage/'verify_artifact.py',*sorted((stage/'notebooks').glob('*.py')),wheel]
     payload=b''.join(str(p.relative_to(stage)).encode()+b'\0'+p.read_bytes()+b'\0' for p in paths)
     return hashlib.sha256(payload).hexdigest()
@@ -330,7 +332,7 @@ class Launcher:
         pin_wheel(spec,stage,wheel)
         (stage/'databricks.yml').write_text(yaml.safe_dump(spec,sort_keys=False),encoding='utf-8')
         validated=command(['databricks','bundle','validate','--output','json'],cwd=stage,env=self.ws_env,json_output=True)
-        fingerprint=deployment_sha(stage)
+        fingerprint=deployment_sha(stage,expected_wheel=wheel)
         print('Job efímero: DBR 15.4, 1 nodo, timeout 2h, sin schedule; escribe solo Silver. Revise '+str(stage/'databricks.yml'))
         approval('DEPLOY-RUN-SILVER',fingerprint)
         receipt=self.work/(parent+'.json')
@@ -352,7 +354,7 @@ class Launcher:
             command(['databricks','fs','cp','dbfs:'+uri,str(existing)],env=self.ws_env)
             require(sha(existing)==sha(receipt),'EXISTING_RECEIPT_DIFFERS_NO_OVERWRITE')
         else:command(['databricks','fs','cp',str(receipt),'dbfs:'+uri],env=self.ws_env)
-        require(deployment_sha(stage)==fingerprint,'BUNDLE_CHANGED_AFTER_APPROVAL')
+        require(deployment_sha(stage,expected_wheel=wheel)==fingerprint,'BUNDLE_CHANGED_AFTER_APPROVAL')
         # Never create a second Job for the same namespace/name. A cleared
         # local deployment record requires explicit state recovery, not adoption.
         job_record=self.work/'job-id.json'

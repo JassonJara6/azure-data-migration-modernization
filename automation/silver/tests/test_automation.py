@@ -185,7 +185,7 @@ def test_default_plan_never_applies_or_requests_approval(tmp_path,monkeypatch):
 def test_changed_saved_plan_cannot_be_applied(tmp_path,monkeypatch):
     import launch as module
     instance,calls=mock_plan_launcher(tmp_path,True)
-    monkeypatch.setattr(module,'approval',lambda *args:(tmp_path/'platform.tfplan').write_bytes(b'changed'))
+    monkeypatch.setattr(module,'approval',lambda *args:next(tmp_path.rglob('plan.tfplan')).write_bytes(b'changed'))
     with pytest.raises(Blocked,match='PLAN_CHANGED_AFTER_APPROVAL'):instance.plan(ROOT,'platform',{})
     assert not any(c[0]=='apply' for c in calls)
 
@@ -196,7 +196,8 @@ def test_declared_resource_provider_registration_is_explicit():
     with pytest.raises(Blocked):review(plan(address,after={'name':'Microsoft.Other'}),'platform')
 
 
-def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch):
+@pytest.mark.parametrize('workspace_mode',[False,True])
+def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch,workspace_mode):
     """Synthetic control-flow test; does not run SQL, build a real wheel or call Azure."""
     import launch as module
     from types import ModuleType
@@ -208,8 +209,9 @@ def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch):
     (source/'databricks.yml').write_text((Path(__file__).parent/'fixtures/pr18-bundle.yml').read_text())
     instance=object.__new__(Launcher);instance.work=repo/'work';instance.work.mkdir()
     instance.c={'parent_run_id':parent};instance.env={};instance.ws_env={}
+    if workspace_mode:instance.c['uc_mode']='workspace'
     uc=dict(catalog='admm_dev',schema='silver',bronze_volume='/Volumes/admm_dev/inputs/bronze',
-      receipt_volume='/Volumes/admm_dev/inputs/receipts',runner_application_id='runner',operator='operator@example.invalid',policy_id='policy',node_type_id='Standard_D4ds_v5')
+      receipt_volume='/Volumes/admm_dev/inputs/receipts',metastore_id='synthetic-region',runner_application_id='runner',operator='operator@example.invalid',policy_id='policy',node_type_id='Standard_D4ds_v5')
     seen=[]
     def cli(args,**kwargs):
         args=list(map(str,args));seen.append(args)
@@ -240,11 +242,16 @@ def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch):
     monkeypatch.setitem(sys.modules,'admm_silver',pkg);monkeypatch.setitem(sys.modules,'admm_silver.contracts',contract)
     monkeypatch.setattr(module,'ROOT',repo);monkeypatch.setattr(module,'command',cli)
     monkeypatch.setattr(module,'approval',lambda *args:None);instance.api=api
+    instance.verify_workspace_run_as=lambda *args:seen.append(['run-as-recheck'])
     instance.deploy_job({'workspace_host':'https://workspace.example.invalid','workspace_resource_id':'synthetic-arm-id'},uc)
     accepted=json.loads((instance.work/'acceptance.json').read_text())
     assert accepted['run_id']==37 and accepted['parent_run_id']==parent and len(accepted['metrics'])==11
     assert any(args[1:4]==['permissions','update','directories'] for args in seen)
     assert not any('--overwrite' in args for args in seen)
+    if workspace_mode:
+        delegated=next(i for i,c in enumerate(seen) if c==['run-as-recheck'])
+        deployed=next(i for i,c in enumerate(seen) if c[1:3]==['bundle','deploy'])
+        assert delegated<deployed
     assert not any('adf' in a.lower() for args in seen for a in args)
 
 

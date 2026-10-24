@@ -4,6 +4,7 @@ The platform root owns existing ADF/storage/state. Only the opt-in module's decl
 resource addresses are eligible for changes. UC is a new, isolated state key.
 """
 import hashlib
+import json
 import re
 
 PLATFORM={
@@ -73,3 +74,14 @@ def review(plan,stage):
 
 def sha(path):
     with open(path,'rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
+
+
+def comparison_sha(plan):
+    """Comparison only: full show JSON minus its top-level generation timestamp.
+
+    Never approve/apply using this digest: it is not the saved binary's identity.
+    Nested timestamps, values, unknowns, configuration and state remain included.
+    """
+    payload={key:value for key,value in plan.items() if key!='timestamp'}
+    canonical=json.dumps(payload,sort_keys=True,separators=(',',':'),ensure_ascii=True,allow_nan=False)
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()

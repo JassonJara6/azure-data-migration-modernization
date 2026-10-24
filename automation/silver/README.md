@@ -87,3 +87,24 @@ Localmente el overlay también se comprobó contra el JSON Schema oficial Databr
 **Limitación de entrega:** no hay credenciales Azure/Databricks ni acceso al backend real en este entorno. No se generó un plan real contra `dev/platform.tfstate`; no puede certificarse ausencia de drift real. Sí se comprobó que el backend/direcciones existentes permanecen intactos y que el launcher rechaza planes destructivos/protegidos antes de aplicar. La comprobación final de cero destrucciones/reemplazos ocurre en los planes reales del operador. No se ejecutaron apply, ADF, R2, despliegue ni aceptación Azure.
 
 Resultado de la entrega de infraestructura original: **38 pruebas Python y 8 casos Terraform con proveedores mock aprobados**; además 83 regresiones offline Bronze (63 pytest y 20 ADF). Las 18 integraciones SQL se omitieron en el run normal. Ninguna prueba representa una ejecución real de Azure/Databricks.
+
+
+## Windows/OneDrive: preparar el wheel sin borrar `dist`
+
+El launcher ya no ejecuta `rmtree(bundle/dist)` ni renombra esa carpeta. Cada intento construye desde una copia limpia de `databricks/silver` en el temporal local del sistema, excluyendo `build`, `dist`, egg-info y cachés. El build utiliza el mismo intérprete Python del launcher, una versión derivada del contenido de `src` y `pyproject.toml`, y `SOURCE_DATE_EPOCH` del commit. La reproducibilidad se comprueba con dos builds locales reales sobre los mismos inputs, epoch y herramientas resueltas; no implica igualdad entre distintas versiones de setuptools/wheel.
+
+Solo se acepta exactamente un wheel en el directorio de salida nuevo. Si el build falla, no produce wheel o produce varios, el flujo se bloquea: nunca recurre a un wheel anterior. Se copia el resultado a `work/silver-deployment/bundle/dist/wheel-<id>/<nombre>.whl`, con creación exclusiva y comprobación SHA-256 de la copia. No se borra ni se sobrescribe el contenido anterior de `dist`; tampoco se modifica la identidad persistente `.databricks` del bundle.
+
+En el bundle generado, tanto `artifacts.silver_wheel.files[].source` como `tasks[].libraries[].whl` apuntan al **mismo archivo exacto**, sin `dist/*.whl`. El fingerprint de aprobación incluye ese wheel, el YAML, el verificador y los notebooks. Los wheels antiguos quedan fuera de la selección y del fingerprint. Dos builds con iguales inputs/epoch/herramientas producen el mismo SHA del wheel; la ruta nueva por intento puede cambiar el fingerprint del bundle y exige su aprobación actual. `dynamic_version=false` impide que DAB cambie el artefacto aprobado. El build de DAB solo ejecuta `verify_artifact.py`: comprueba el SHA fijado incluso bajo Python `-O`; no reconstruye ni escoge otro wheel.
+
+La limpieza del temporal de compilación es opcional. Si Windows/antivirus impide eliminarlo se informa `BUILD_TEMP_CLEANUP_DEFERRED` y se conserva el wheel ya copiado/verificado. Este manejo no ignora fallos del build, copia o verificación y no cambia atributos, permisos ni configuración de OneDrive. El temporal usa la ubicación del sistema (`tempfile`); si se personalizó TEMP/TMP, debe ser una ubicación local apropiada para compilaciones.
+
+Después de integrar la corrección y **solo con autorización para aplicar/desplegar/ejecutar**, desde Git Bash:
+
+```bash
+winpty python automation/silver/launch.py --stage silver --uc-mode workspace --workspace-profile admm-workspace --metastore-id b67792ab-c53b-48b4-ae57-fc45b869ed7a --config work/silver-dev.json --deploy
+```
+
+No es necesario borrar ni renombrar `dist` antes de repetirlo. Se mantienen los controles Terraform, la delegación RUN AS, la exportación protegida del recibo real y la aprobación separada `DEPLOY-RUN-SILVER`. Sin `--deploy` solo se planifica; no se construye ni ejecuta Silver. La validación local usa mocks de Windows/Job y builds reales de wheel sin recursos Azure; no representa un despliegue real ni certifica la ejecución de las once fuentes.
+
+Validación de esta corrección: **146 pruebas locales aprobadas**, incluyendo WinError 5 simulado, selección frente a wheels obsoletos, fallos de build, verificación SHA con Python `-O` y dos compilaciones reales reproducibles. Bundle generado contrastado con JSON Schema oficial de Databricks CLI 0.275.0. `compileall` y `git diff --check` aprobados; sin prueba de despliegue real en Windows/Databricks.

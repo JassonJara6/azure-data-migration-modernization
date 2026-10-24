@@ -258,7 +258,9 @@ def test_same_uc_backend_key_and_no_account_provider_in_new_root():
     backend=(root/'terraform/databricks/workspace/backend.tf').read_text()
     assert 'key                  = "dev/databricks-uc.tfstate"' in backend
     assert 'key                  = "dev/platform.tfstate"' not in backend
-    assert (root/'terraform/databricks/workspace/.terraform.lock.hcl').read_bytes()==(root/'terraform/databricks/dev/.terraform.lock.hcl').read_bytes()
+    lock=(root/'terraform/databricks/workspace/.terraform.lock.hcl').read_text()
+    assert 'version = "1.110.0"' in text and 'version     = "1.110.0"' in lock
+    assert 'version     = "1.95.0"' in (root/'terraform/databricks/dev/.terraform.lock.hcl').read_text()
 
 
 def test_account_mode_cannot_take_over_partial_workspace_state(tmp_path):

@@ -4,6 +4,28 @@ Esta es la guía vigente para continuar **después de fusionar este PR**. No se 
 
 Estado comunicado por el operador: workspace `dbw-admm-dev-f6d99ba4`, ID `7405617270738925`; metastore asignado `b67792ab-c53b-48b4-ae57-fc45b869ed7a`; perfil autenticado `admm-workspace`. El grupo `_workspace_admins_dbw_admm_dev_f6d99ba4_7405617270738925` tiene CREATE_CATALOG, CREATE_STORAGE_CREDENTIAL y CREATE_EXTERNAL_LOCATION. Esta entrega no consultó Azure/Databricks ni confirmó esos permisos en vivo.
 
+
+## Corrección OAuth del proveedor en Windows
+
+`databricks current-user me --profile admm-workspace` puede funcionar mientras Terraform 1.95.0 informa `databricks-cli auth: not configured`. No hay contradicción: el nombre de la estrategia no garantiza que esa versión ejecute la CLI.
+
+| Componente | Comportamiento comprobado en su código fuente |
+| --- | --- |
+| Provider **1.95.0**, SDK Go **0.87.0** | `databricks-cli` usa `NewPersistentAuth` con `NewFileTokenCache`, cuya ubicación predeterminada es `~/.databricks/token-cache.json`. Si no encuentra la sesión devuelve una estrategia sin configurar; no consulta el almacenamiento seguro de la CLI mediante su proceso. |
+| Provider **1.110.0**, SDK Go **0.113.0** | `databricks-cli` usa `NewCliTokenSource`; con perfil nombrado invoca la CLI con ese perfil. La CLI gestiona su almacenamiento seguro y la renovación OAuth. El proveedor recibe la respuesta internamente, sin exportación manual de tokens. |
+
+El síntoma y el almacenamiento seguro Windows comunicados por el operador corresponden a esta incompatibilidad del consumidor antiguo de la caché. La causa se contrastó con las fuentes upstream; no se inspeccionaron cachés ni credenciales del operador. La aceptación del almacenamiento protegido en su Windows requiere el plan real posterior; no se declara comprobada desde Linux.
+
+Corrección mínima: fijar **1.110.0 solo en `terraform/databricks/workspace`**, con lock/checksums publicados para Linux amd64 y Windows amd64. Se mantienen `host`, `profile`, `auth_type = "databricks-cli"`, el backend/clave y las guardas del launcher. La configuración histórica de cuenta conserva 1.95.0 y queda fuera de esta corrección. No se usa un rango abierto ni se actualizan AzureRM, identidades o recursos. No es necesario copiar el token, reconstruir `token-cache.json`, usar PAT, cambiar a una caché de archivo ni recurrir a Account Admin.
+
+Usar la CLI Go moderna que ya contiene la sesión, accesible como ejecutable nativo `databricks.exe` en el PATH de los procesos Windows. Un alias/función exclusivo de Bash o la CLI Python antigua no basta para el subprocess del proveedor. El perfil nombrado requiere soporte de `auth token --profile` (CLI >=0.207.1); una CLI reciente con almacenamiento seguro cumple ese requisito. Ejecutar launcher/Terraform bajo el mismo usuario Windows que autenticó `admm-workspace`, sin elevar a otra cuenta. No cambiar HOME/USERPROFILE ni trasladar el almacenamiento protegido para resolverlo.
+
+Después de fusionar, ejecutar **solo el plan UC** de la sección de comandos. El launcher inicializa con `-lockfile=readonly` e instala la versión fijada en el lock nuevo; no necesita `init -upgrade`, overrides de backend ni migración de estado. Regenera el plan y su hash con el proveedor nuevo; los planes antiguos de 1.95.0 no se reutilizan. El resultado esperado es una revisión `stage: uc-workspace` con su SHA256; no un apply ni un Job. Si después aparece un error de permisos o de drift, se investiga por separado sin desactivar las validaciones.
+
+Fuentes versionadas: [go.mod Provider 1.95.0](https://github.com/databricks/terraform-provider-databricks/blob/v1.95.0/go.mod), [estrategia SDK 0.87.0](https://github.com/databricks/databricks-sdk-go/blob/v0.87.0/config/auth_u2m.go), [caché antigua](https://github.com/databricks/databricks-sdk-go/blob/v0.87.0/credentials/u2m/persistent_auth.go), [go.mod Provider 1.110.0](https://github.com/databricks/terraform-provider-databricks/blob/v1.110.0/go.mod), [delegación CLI/perfil SDK 0.113.0](https://github.com/databricks/databricks-sdk-go/blob/v0.113.0/config/cli_token_source.go).
+
+Regresión adicional: se ejecuta el **binario real del proveedor 1.110.0** contra un servidor HTTP de loopback y una CLI sintética, con un perfil de prueba sin credenciales. Comprueba que invoca el perfil elegido incluso con espacios en la ruta del ejecutable, permite una lectura de metastore con la sesión sintética y falla sin cambiar de identidad cuando esa sesión no existe. No conecta a Azure/Databricks, no usa el backend, no aplica y no lee el almacén real. Esta prueba POSIX se ejecuta también en CI; la comprobación Windows sigue siendo el plan del operador. Resultado local de esta corrección: **117 pruebas de automatización aprobadas** (incluidas las dos de transporte con el proveedor real), **4 planes Terraform mock aprobados**, `validate`, `fmt`, `compileall` y `git diff --check` aprobados. No se ejecutaron apply, Jobs ni operaciones cloud.
+
 ## Qué requiere cada operación
 
 | Operación | Permisos/contexto | Ruta nueva |
@@ -92,6 +114,6 @@ Antes de aplicar verifica el SP y el rule set por el perfil workspace. Conserva 
 
 ## Evidencia y referencias
 
-Validación local agregada: **230 pruebas Python aprobadas** (115 de automatización, 83 Bronze y 32 Silver/Spark/Delta), con **18 integraciones SQL omitidas**; `fmt`/`validate` en los cuatro roots y **12 casos Terraform de planes mock** aprobados. `compileall` y `git diff --check` aprobados. Las pruebas son locales y los planes Terraform usan proveedores simulados. No se accedió al backend ni al workspace real; no hay credenciales Azure/Databricks configuradas en este entorno. No se hizo apply, creación Azure, exportación SQL, Job, modificación Bronze ni R2. Los resultados locales/CI constan en el PR; no representan aceptación real UC/Silver.
+Validación histórica del PR #21 de la ruta workspace: **230 pruebas Python aprobadas** (115 de automatización, 83 Bronze y 32 Silver/Spark/Delta), con **18 integraciones SQL omitidas**; `fmt`/`validate` en los cuatro roots y **12 casos Terraform de planes mock** aprobados. `compileall` y `git diff --check` aprobados. Las pruebas son locales y los planes Terraform usan proveedores simulados. No se accedió al backend ni al workspace real; no hay credenciales Azure/Databricks configuradas en este entorno. No se hizo apply, creación Azure, exportación SQL, Job, modificación Bronze ni R2. Los resultados locales/CI constan en el PR; no representan aceptación real UC/Silver.
 
 Referencias revisadas: [provider 1.95: data service principal en workspace](https://github.com/databricks/terraform-provider-databricks/blob/v1.95.0/docs/data-sources/service_principal.md), [roles de service principal](https://learn.microsoft.com/azure/databricks/admin/users-groups/service-principal-acl), [Account Access Control Proxy — SDK oficial](https://github.com/databricks/databricks-sdk-go/blob/v0.111.0/service/iam/impl.go), [formato de rule sets y principales](https://github.com/databricks/terraform-provider-databricks/blob/v1.95.0/docs/resources/access_control_rule_set.md), [privilegios UC](https://learn.microsoft.com/azure/databricks/data-governance/unity-catalog/manage-privileges/privileges).

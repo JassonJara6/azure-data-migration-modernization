@@ -197,7 +197,8 @@ def test_declared_resource_provider_registration_is_explicit():
 
 
 @pytest.mark.parametrize('workspace_mode',[False,True])
-def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch,workspace_mode):
+@pytest.mark.parametrize('locked_cleanup',[False,True])
+def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch,workspace_mode,locked_cleanup):
     """Synthetic control-flow test; does not run SQL, build a real wheel or call Azure."""
     import launch as module
     from types import ModuleType
@@ -212,6 +213,12 @@ def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch,workspac
     if workspace_mode:instance.c['uc_mode']='workspace'
     uc=dict(catalog='admm_dev',schema='silver',bronze_volume='/Volumes/admm_dev/inputs/bronze',
       receipt_volume='/Volumes/admm_dev/inputs/receipts',metastore_id='synthetic-region',runner_application_id='runner',operator='operator@example.invalid',policy_id='policy',node_type_id='Standard_D4ds_v5')
+    stage=instance.work/'bundle';(stage/'dist').mkdir(parents=True)
+    (stage/'dist/stale.whl').write_bytes(b'old wheel must not be used')
+    (stage/'.databricks').mkdir();(stage/'.databricks/state-marker').write_text('keep deployment identity')
+    if locked_cleanup:
+        def windows_denied(*args,**kwargs):raise PermissionError('[WinError 5] Acceso denegado')
+        monkeypatch.setattr(module.shutil,'rmtree',windows_denied)
     seen=[]
     def cli(args,**kwargs):
         args=list(map(str,args));seen.append(args)
@@ -219,8 +226,13 @@ def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch,workspac
         if '-m' in args and 'build' in args:
             import tomllib
             assert tomllib.loads((Path(kwargs['cwd'])/'pyproject.toml').read_text())['project']['version'].startswith('0.1.0+')
-            dist=Path(kwargs['cwd'])/'dist';dist.mkdir();(dist/'synthetic.whl').write_bytes(b'synthetic artifact, not a wheel')
+            dist=Path(args[args.index('--outdir')+1]);(dist/'synthetic.whl').write_bytes(b'synthetic artifact, not a wheel')
         elif 'validate' in args:
+            spec=yaml.safe_load((stage/'databricks.yml').read_text())
+            selected=spec['artifacts']['silver_wheel']['files'][0]['source']
+            assert selected.startswith('./dist/wheel-') and '*' not in selected
+            assert spec['resources']['jobs']['silver']['tasks'][0]['libraries']==[{'whl':selected}]
+            assert (stage/selected).read_bytes()==b'synthetic artifact, not a wheel'
             return dict(workspace={'root_path':'/Workspace/Shared/admm_dev/admm-silver/dev'},resources={'jobs':{'silver':{'name':'adventureworks-silver-dev'}}})
         elif any('export_committed_parent.py' in a for a in args):
             assert kwargs['interactive'] is True
@@ -245,6 +257,8 @@ def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch,workspac
     instance.verify_workspace_run_as=lambda *args:seen.append(['run-as-recheck'])
     instance.deploy_job({'workspace_host':'https://workspace.example.invalid','workspace_resource_id':'synthetic-arm-id'},uc)
     accepted=json.loads((instance.work/'acceptance.json').read_text())
+    assert (stage/'dist/stale.whl').read_bytes()==b'old wheel must not be used'
+    assert (stage/'.databricks/state-marker').read_text()=='keep deployment identity'
     assert accepted['run_id']==37 and accepted['parent_run_id']==parent and len(accepted['metrics'])==11
     assert any(args[1:4]==['permissions','update','directories'] for args in seen)
     assert not any('--overwrite' in args for args in seen)
@@ -257,7 +271,7 @@ def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch,workspac
 
 def test_deployment_approval_covers_notebook_code(tmp_path):
     from launch import deployment_sha
-    (tmp_path/'databricks.yml').write_text('bundle: test')
+    (tmp_path/'databricks.yml').write_text(yaml.safe_dump({'artifacts':{'silver_wheel':{'files':[{'source':'./dist/code.whl'}]}},'resources':{'jobs':{'silver':{'tasks':[{'libraries':[{'whl':'./dist/code.whl'}]}]}}}}))
     (tmp_path/'verify_artifact.py').write_text('# fixed verifier')
     (tmp_path/'notebooks').mkdir();notebook=tmp_path/'notebooks/run.py';notebook.write_text('# approved code')
     (tmp_path/'dist').mkdir();(tmp_path/'dist/code.whl').write_bytes(b'synthetic artifact')

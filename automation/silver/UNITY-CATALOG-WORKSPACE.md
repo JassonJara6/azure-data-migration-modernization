@@ -57,6 +57,8 @@ Los planes permanecen guardados en `work/silver-deployment`; la etapa nueva se l
 
 ## Comandos exactos tras fusionar
 
+En Windows con el repositorio en OneDrive, la preparación del wheel [ya no requiere borrar `dist`](README.md): usa salida nueva y fija el archivo exacto en el bundle, conservando `.databricks` y las verificaciones SHA.
+
 Desde la raíz del repositorio, Windows/Git Bash, con las dependencias existentes instaladas y las sesiones Azure CLI/perfil `admm-workspace` válidas. No hace falta reloguear ni configurar Account Console si la sesión ya funciona. No usar PAT, contraseñas en flags ni `--debug`.
 
 **1. Plan UC reutilizando el workspace y metastore desplegados; sin apply ni Jobs:**

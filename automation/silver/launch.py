@@ -18,6 +18,7 @@ import urllib.parse
 import yaml
 from plan_guard import Blocked,require,review,sha,comparison_sha
 from bundle_overlay import ephemeral_bundle
+from wheel_artifact import build_wheel,pin_wheel,selected_wheel
 from diagnose import diagnose, safe_failure, SUBSCRIPTION, TENANT
 from workspace_uc import ensure_workspace_state, profile_environment, verify_assignment, verify_runner, verify_run_as
 
@@ -48,8 +49,12 @@ def command(args,*,cwd=ROOT,env=None,json_output=False,allowed=(0,),interactive=
     return json.loads(result.stdout) if json_output else result.stdout
 
 
-def deployment_sha(stage):
-    paths=[stage/'databricks.yml',stage/'verify_artifact.py',*sorted((stage/'notebooks').glob('*.py')),*sorted((stage/'dist').glob('*.whl'))]
+def deployment_sha(stage,*,expected_wheel=None):
+    spec=yaml.safe_load((stage/'databricks.yml').read_text())
+    wheel=selected_wheel(stage,spec)
+    if expected_wheel is not None:
+        require(wheel==expected_wheel.resolve(),'FRESH_WHEEL_SELECTION_CHANGED')
+    paths=[stage/'databricks.yml',stage/'verify_artifact.py',*sorted((stage/'notebooks').glob('*.py')),wheel]
     payload=b''.join(str(p.relative_to(stage)).encode()+b'\0'+p.read_bytes()+b'\0' for p in paths)
     return hashlib.sha256(payload).hexdigest()
 
@@ -315,29 +320,19 @@ class Launcher:
         stage=self.work/'bundle';source=ROOT/'databricks/silver'
         # Keep .databricks deployment identity across reruns; sync code only.
         shutil.copytree(source,stage,dirs_exist_ok=True,ignore=shutil.ignore_patterns('.databricks','build','dist','*.egg-info','__pycache__'))
-        dist=stage/'dist'
-        if dist.exists():shutil.rmtree(dist)
-        source_hash=hashlib.sha256(b''.join(str(p.relative_to(stage)).encode()+b'\0'+p.read_bytes()+b'\0' for p in sorted((stage/'src').rglob('*')) if p.is_file() and '__pycache__' not in p.parts)).hexdigest()[:12]
-        project=stage/'pyproject.toml'
-        project.write_text(re.sub(r'(?m)^version = .*$', f'version = "0.1.0+{source_hash}"',project.read_text()))
         spec=ephemeral_bundle(yaml.safe_load((source/'databricks.yml').read_text()),uc,workspace['workspace_host'])
         parent=self.c.get('parent_run_id',PARENT);uuid(parent)
         uri=uc['receipt_volume']+'/'+parent+'.json'
         spec['variables']['catalog']['default']=uc['catalog'];spec['variables']['schema']['default']=uc['schema']
         spec['variables']['bronze_volume']['default']=uc['bronze_volume'];spec['variables']['receipt_file']['default']=uri
         spec['variables']['parent_run_id']['default']=parent
-        spec['artifacts']['silver_wheel']['build']='python verify_artifact.py'
-        spec['artifacts']['silver_wheel']['dynamic_version']=False
-        (stage/'databricks.yml').write_text(yaml.safe_dump(spec,sort_keys=False),encoding='utf-8')
         epoch=command(['git','log','-1','--format=%ct']).strip()
         require(epoch.isdigit(),'REPRODUCIBLE_BUILD_EPOCH_REQUIRED')
-        command([sys.executable,'-m','build','--wheel'],cwd=stage,env=dict(self.env,SOURCE_DATE_EPOCH=epoch))
+        wheel=build_wheel(source,stage,epoch,self.env,command)
+        pin_wheel(spec,stage,wheel)
+        (stage/'databricks.yml').write_text(yaml.safe_dump(spec,sort_keys=False),encoding='utf-8')
         validated=command(['databricks','bundle','validate','--output','json'],cwd=stage,env=self.ws_env,json_output=True)
-        wheels=list(dist.glob('*.whl'));require(len(wheels)==1,'EXACTLY_ONE_WHEEL_REQUIRED')
-        wheel=wheels[0]
-        verifier="from pathlib import Path\nimport hashlib\np=Path('dist')/"+repr(wheel.name)+"\nassert hashlib.sha256(p.read_bytes()).hexdigest()=="+repr(sha(wheel))+"\n"
-        (stage/'verify_artifact.py').write_text(verifier)
-        fingerprint=deployment_sha(stage)
+        fingerprint=deployment_sha(stage,expected_wheel=wheel)
         print('Job efímero: DBR 15.4, 1 nodo, timeout 2h, sin schedule; escribe solo Silver. Revise '+str(stage/'databricks.yml'))
         approval('DEPLOY-RUN-SILVER',fingerprint)
         receipt=self.work/(parent+'.json')
@@ -359,7 +354,7 @@ class Launcher:
             command(['databricks','fs','cp','dbfs:'+uri,str(existing)],env=self.ws_env)
             require(sha(existing)==sha(receipt),'EXISTING_RECEIPT_DIFFERS_NO_OVERWRITE')
         else:command(['databricks','fs','cp',str(receipt),'dbfs:'+uri],env=self.ws_env)
-        require(deployment_sha(stage)==fingerprint,'BUNDLE_CHANGED_AFTER_APPROVAL')
+        require(deployment_sha(stage,expected_wheel=wheel)==fingerprint,'BUNDLE_CHANGED_AFTER_APPROVAL')
         # Never create a second Job for the same namespace/name. A cleared
         # local deployment record requires explicit state recovery, not adoption.
         job_record=self.work/'job-id.json'

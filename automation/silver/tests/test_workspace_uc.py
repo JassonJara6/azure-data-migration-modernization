@@ -59,7 +59,7 @@ def workspace_launcher(tmp_path, *, deploy=False, stage='uc', runner=None, owned
                     'storage_account_name': {'value': 'stadmmdevdlf6d99ba4'}, 'silver_workspace': {'value': WS}}
         return {'deployment': {'value': dict(provisioning_mode='workspace', runner_application_id=runner, metastore_id=META)}}
     obj.outputs = outputs
-    obj.plan = lambda root, stage, variables: calls.append(('plan', root, stage, variables)) or False
+    obj.plan = lambda root, stage, variables, **kwargs: calls.append(('plan', root, stage, variables)) or False
     obj.account_api = lambda *a: pytest.fail('Workspace path must never call account APIs')
     obj.deploy_job = lambda *a: pytest.fail('No Jobs in UC stage')
     return obj, calls
@@ -246,7 +246,7 @@ def test_workspace_saved_plan_hash_is_rechecked_before_apply(tmp_path,monkeypatc
             return saved_plan('databricks_catalog.silver',['create']) if '-json' in args else 'synthetic review'
         return ''
     obj.tf=tf
-    monkeypatch.setattr(launch,'approval',lambda *a:(tmp_path/'uc-workspace.tfplan').write_bytes(b'changed'))
+    monkeypatch.setattr(launch,'approval',lambda *a:next(tmp_path.rglob('plan.tfplan')).write_bytes(b'changed'))
     with pytest.raises(Blocked,match='PLAN_CHANGED_AFTER_APPROVAL'):obj.plan(launch.UC_WORKSPACE,'uc-workspace',{})
     assert not any(c[0]=='apply' for c in calls)
 
@@ -300,3 +300,22 @@ def test_existing_uc_owners_cannot_be_silently_overwritten():
     with pytest.raises(Blocked,match='OWNER_MISMATCH'):
         ensure_workspace_state({'databricks_catalog.silver':{'owner':'other@example.invalid'}},OP)
     ensure_workspace_state({'databricks_catalog.silver':{'owner':OP.upper()}},OP)
+
+
+def test_workspace_silver_rechecks_run_as_after_approval_callback(tmp_path):
+    obj,calls=workspace_launcher(tmp_path,deploy=True,stage='silver',runner=APP)
+    obj.c['account_id']=ACCOUNT
+    original=obj.api;revoked=False
+    def api(method,path):
+        if revoked and 'access-control/rule-sets?' in path:
+            return {'name':f'accounts/{ACCOUNT}/servicePrincipals/{APP}/ruleSets/default','grant_rules':[]}
+        return original(method,path)
+    obj.api=api
+    def plan(root,stage,variables,*,before_apply=None):
+        nonlocal revoked
+        assert callable(before_apply)
+        revoked=True # Synthetic revocation while the user reviewed the plan.
+        before_apply()
+        pytest.fail('Revocation must block before apply')
+    obj.plan=plan
+    with pytest.raises(Blocked,match='USER_GRANT_NOT_PROVEN'):obj.provision()

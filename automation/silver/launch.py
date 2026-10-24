@@ -13,9 +13,10 @@ import shutil
 import subprocess
 import sys
 import time
+import tempfile
 import urllib.parse
 import yaml
-from plan_guard import Blocked,require,review,sha
+from plan_guard import Blocked,require,review,sha,comparison_sha
 from bundle_overlay import ephemeral_bundle
 from diagnose import diagnose, safe_failure, SUBSCRIPTION, TENANT
 from workspace_uc import ensure_workspace_state, profile_environment, verify_assignment, verify_runner, verify_run_as
@@ -133,23 +134,45 @@ class Launcher:
         self.tf(root,'validate')
     def outputs(self,root):
         return self.tf(root,'output','-json',json_output=True)
-    def plan(self,root,stage,variables):
-        vars_path=self.work/(stage+'.auto.tfvars.json')
+    def plan(self,root,stage,variables,*,before_apply=None):
+        # Never overwrite another invocation's pending approval/review artifacts.
+        plans=self.work/'plans';plans.mkdir(mode=0o700,parents=True,exist_ok=True)
+        run=Path(tempfile.mkdtemp(prefix=stage+'-',dir=plans))
+        vars_path=run/'variables.tfvars.json'
         vars_path.write_text(json.dumps(variables,indent=2),encoding='utf-8')
-        saved=self.work/(stage+'.tfplan')
+        saved=run/'plan.tfplan'
         self.tf(root,'plan','-input=false','-lock-timeout=120s','-out='+str(saved),'-var-file='+str(vars_path))
+        fingerprint=sha(saved) # SHA-256 of ALL saved binary bytes, before any rendering.
         plan=self.tf(root,'show','-json',str(saved),json_output=True)
+        require(sha(saved)==fingerprint,'PLAN_CHANGED_DURING_REVIEW')
         changes=review(plan,stage)
-        human=self.work/(stage+'-plan.txt');human.write_text(self.tf(root,'show','-no-color',str(saved)),encoding='utf-8')
-        fingerprint=sha(saved)
-        (self.work/(stage+'-review.json')).write_text(json.dumps({'sha256':fingerprint,'changes':changes,'stage':stage},indent=2),encoding='utf-8')
-        print(json.dumps({'stage':stage,'plan_sha256':fingerprint,'changes':changes,'review_file':str(human)},ensure_ascii=True))
+        rendered=self.tf(root,'show','-no-color',str(saved))
+        require(sha(saved)==fingerprint,'PLAN_CHANGED_DURING_REVIEW')
+        human=run/'plan.txt';human.write_text(rendered,encoding='utf-8')
+        text_fingerprint=sha(human)
+        comparison=comparison_sha(plan)
+        metadata=run/'review.json'
+        details={'stage':stage,'sha256':fingerprint,'plan_sha256':fingerprint,
+            'approval_artifact':'terraform_saved_binary_plan','plan_file':str(saved),
+            'comparison_json_sha256':comparison,'comparison_excludes':['timestamp'],
+            'terraform_timestamp':plan.get('timestamp'),'changes':changes,'review_file':str(human),
+            'review_text_sha256':text_fingerprint}
+        metadata.write_text(json.dumps(details,indent=2),encoding='utf-8')
+        print(json.dumps(dict(details,review_metadata_file=str(metadata)),ensure_ascii=True))
         if changes and self.deploy:
-            print('Revise el plan completo en el archivo indicado. Se rechazan destrucciones/reemplazos y cambios protegidos.')
+            print('El SHA de aprobación identifica este binario, y puede cambiar al regenerarlo. '
+                  'Revise el archivo indicado y apruebe en ESTA ejecución. El hash JSON es solo comparativo.')
             approval('APPLY-'+stage.upper(),fingerprint)
             require(sha(saved)==fingerprint,'PLAN_CHANGED_AFTER_APPROVAL')
-            require(review(self.tf(root,'show','-json',str(saved),json_output=True),stage)==changes,'PLAN_REVIEW_CHANGED')
-            self.tf(root,'apply','-input=false',str(saved))
+            require(sha(human)==text_fingerprint,'PLAN_REVIEW_TEXT_CHANGED_AFTER_APPROVAL')
+            current=self.tf(root,'show','-json',str(saved),json_output=True)
+            require(sha(saved)==fingerprint,'PLAN_CHANGED_AFTER_APPROVAL')
+            require(review(current,stage)==changes,'PLAN_REVIEW_CHANGED')
+            require(current==plan,'PLAN_CONTENT_CHANGED_AFTER_APPROVAL')
+            if before_apply:before_apply() # Recheck authorization after the human wait.
+            require(sha(human)==text_fingerprint,'PLAN_REVIEW_TEXT_CHANGED_AFTER_APPROVAL')
+            require(sha(saved)==fingerprint,'PLAN_CHANGED_AFTER_APPROVAL')
+            self.tf(root,'apply','-input=false',str(saved)) # Exact approved artifact, never replan.
         return not changes or self.deploy
     def provision(self):
         if self.deploy and getattr(self,"stage","all") in ('all','silver'):
@@ -241,7 +264,11 @@ class Launcher:
         try:
             self.init(UC_WORKSPACE)
             ensure_workspace_state(state_resources(self.tf(UC_WORKSPACE,'show','-json',json_output=True)),operator)
-            applied=self.plan(UC_WORKSPACE,'uc-workspace',variables)
+            if self.deploy and self.stage!='uc':
+                applied=self.plan(UC_WORKSPACE,'uc-workspace',variables,
+                    before_apply=lambda:self.verify_workspace_run_as(workspace,selected,operator,runner))
+            else:
+                applied=self.plan(UC_WORKSPACE,'uc-workspace',variables)
             output=self.outputs(UC_WORKSPACE)['deployment']['value'] if applied else None
         finally:self.env=original_env
         if not applied:return None
@@ -252,6 +279,12 @@ class Launcher:
         if self.stage=='uc':
             print(json.dumps({'status':'UC_CONFIGURED','silver':'NOT_DEPLOYED_RUN_AS_NOT_VERIFIED'}));return None
         return workspace,output
+    def verify_workspace_run_as(self,workspace,metastore_id,operator,runner):
+        verify_assignment(self.api,workspace,metastore_id,operator)
+        verify_runner(self.api,runner)
+        account=self.c.get('account_id')
+        if account:uuid(account)
+        verify_run_as(self.api,account,runner,operator)
     def assignment_for(self,workspace_id):
         # List assignments on known metastores: no heuristic 404 handling and
         # no swallowing authorization/transport failures.
@@ -345,6 +378,8 @@ class Launcher:
         if existing:
             active=self.api('get','/api/2.1/jobs/runs/list?job_id='+str(existing[0])+'&active_only=true')
             require(not active.get('runs',[]),'ACTIVE_SILVER_RUN_USE_STOP_OR_WAIT')
+        if self.c.get('uc_mode')=='workspace':
+            self.verify_workspace_run_as(workspace,uc['metastore_id'],uc['operator'],uc['runner_application_id'])
         command(['databricks','bundle','deploy'],cwd=stage,env=self.ws_env)
         resources=command(['databricks','bundle','summary','--output','json'],cwd=stage,env=self.ws_env,json_output=True)
         job_id=resources['resources']['jobs']['silver']['id']

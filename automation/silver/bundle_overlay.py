@@ -28,6 +28,9 @@ def ephemeral_bundle(original,uc,host):
       'spark_conf':{'spark.databricks.cluster.profile':'singleNode','spark.master':'local[*]'},
       'custom_tags':{'ResourceClass':'SingleNode','project':'admm','layer':'silver'},
       'azure_attributes':{'availability':'ON_DEMAND_AZURE'}}}]
+    # Explicit driver fallback only: this single-node Job has no workers.
+    if uc.get('driver_alternate_node_type_ids'):
+        job['job_clusters'][0]['new_cluster']['driver_node_type_flexibility']={'alternate_node_type_ids':uc['driver_alternate_node_type_ids']}
     value['workspace']={'host':host,'root_path':'/Workspace/Shared/'+uc.get('catalog','admm_dev')+'/admm-silver/${bundle.target}'}
     # This staging copy has a separate local identity but stable deployment name.
     value['bundle']['name']='adventureworks-silver-infrastructure'

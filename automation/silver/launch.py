@@ -17,6 +17,7 @@ import tempfile
 import urllib.parse
 import yaml
 from plan_guard import Blocked,require,review,sha,comparison_sha
+from compute_capacity import select_alternates,check_run_result
 from notebook_guard import verify_deployed_task
 from bundle_overlay import ephemeral_bundle
 from wheel_artifact import build_wheel,pin_wheel,selected_wheel
@@ -308,6 +309,15 @@ class Launcher:
         require(any(v['key']=='15.4.x-scala2.12' for v in versions['versions']),'DBR_15_4_UNAVAILABLE')
         nodes=self.api('get','/api/2.0/clusters/list-node-types')
         require(any(n['node_type_id']==uc['node_type_id'] for n in nodes['node_types']),'NODE_TYPE_UNAVAILABLE')
+        # All calls are read-only. Catalog availability is not live capacity.
+        schema=command(['databricks','bundle','schema'],env=self.ws_env,json_output=True)
+        skus=command(['az','vm','list-skus','--location','eastus','--resource-type','virtualMachines','--subscription',SUBSCRIPTION,'--all','--output','json'],env=self.env,json_output=True)
+        usages=command(['az','vm','list-usage','--location','eastus','--subscription',SUBSCRIPTION,'--output','json'],env=self.env,json_output=True)
+        policy=self.api('get','/api/2.0/policies/clusters/get?policy_id='+urllib.parse.quote(uc['policy_id'],safe=''))
+        uc['driver_alternate_node_type_ids']=select_alternates(uc['node_type_id'],nodes,skus,policy,schema,usages)
+        print(json.dumps({'status':'SILVER_COMPUTE_PREFLIGHT','primary':uc['node_type_id'],
+            'driver_alternates':uc['driver_alternate_node_type_ids'],'region':'eastus',
+            'live_capacity':'NOT_GUARANTEED','quota':'REGIONAL_AND_FAMILY_SNAPSHOT_CHECKED'}))
         for volume in ('bronze','receipts'):
             name=uc['catalog']+'.inputs.'+volume
             permissions=self.api('get','/api/2.1/unity-catalog/permissions/volume/'+name)
@@ -397,7 +407,7 @@ class Launcher:
             if state['life_cycle_state'] in ('TERMINATED','SKIPPED','INTERNAL_ERROR'):break
             require(time.monotonic()<deadline,'JOB_WAIT_TIMEOUT_USE_STOP')
             print('Silver: '+state['life_cycle_state']);time.sleep(15)
-        require(state.get('result_state')=='SUCCESS','DATABRICKS_JOB_FAILED_CHECK_RUN_UI')
+        check_run_result(state)
         task=next(t for t in run['tasks'] if t['task_key']=='transform_and_verify')
         output=self.api('get','/api/2.1/jobs/runs/get-output?run_id='+str(task['run_id']))
         require(not output.get('notebook_output',{}).get('truncated',False),'JOB_OUTPUT_TRUNCATED')

@@ -43,7 +43,7 @@ Si faltan cuenta, OAuth o privilegios administrativos, las etapas UC/Job se deti
 
 ## Un único procedimiento del operador
 
-Preparación única: integrar los PR revisados #18 y el de infraestructura; Python **3.11+**, Terraform **1.9+**, Azure CLI, Databricks CLI moderno (esquema comprobado con 0.275.0), `winpty` de Git for Windows y herramientas de construcción wheel. Instalar `automation/silver/requirements.txt` y las dependencias existentes de `adf/tools/requirements-commit.txt`; ODBC Driver 18 y el SQL Server local deben estar disponibles. El cliente local no necesita ejecutar Spark ni disponer de un cluster existente.
+Preparación única: integrar los PR revisados #18 y el de infraestructura; Python **3.11+**, Terraform **1.9+**, Azure CLI, Databricks CLI **0.285.0+** (necesario para driver flexible node types), `winpty` de Git for Windows y herramientas de construcción wheel. Instalar `automation/silver/requirements.txt` y las dependencias existentes de `adf/tools/requirements-commit.txt`; ODBC Driver 18 y el SQL Server local deben estar disponibles. El cliente local no necesita ejecutar Spark ni disponer de un cluster existente.
 
 Preparar Azure CLI para la etapa workspace; OAuth de cuenta solo es requisito para `--stage all`; el perfil de cuenta debe corresponder al administrador autorizado. No pasar PATs ni contraseñas a flags/variables Bash. El launcher rechaza DATABRICKS_TOKEN en el entorno. El acceso workspace usa Azure CLI con ARM resource ID, sin escribir tokens en Terraform ni construir un `.databrickscfg` con secretos.
 
@@ -133,3 +133,11 @@ These are local regression checks, not evidence of an actual Databricks upload
 or successful Silver execution. Merge the fix and repeat the existing launcher
 procedure with its hash approvals; a real deployment/Job still requires operator
 authorization. No manual notebook upload or new infrastructure is needed.
+
+### Capacidad del clúster Silver
+
+El launcher usa ahora alternativas compatibles para el único nodo driver, con
+verificaciones de catálogo del workspace, restricciones East US, cuotas y política
+existente. Véase [procedimiento y límites de capacidad](COMPUTE-CAPACITY.md).
+CLI 0.275.0 ya no basta para esta ruta; se requiere 0.285.0+. Las comprobaciones
+no garantizan disponibilidad física y no se realizan reintentos automáticos del Job.

@@ -38,13 +38,13 @@ def safe_failure(text, default='COMMAND_FAILED'):
     return {'code': default}
 
 
-def read_json(args):
+def read_json(args, *, timeout=60):
     program = shutil.which(args[0])
     if not program:
         return None, {'code': 'TOOL_MISSING', 'tool': args[0]}
     try:
         result = subprocess.run([program, *args[1:]], text=True, encoding='utf-8', errors='strict', capture_output=True,
-                                timeout=60, shell=False,
+                                timeout=timeout, shell=False,
                                 env=dict(os.environ,PYTHONUTF8='1',PYTHONIOENCODING='utf-8'))
     except subprocess.TimeoutExpired:
         return None, {'code': 'READ_TIMEOUT'}

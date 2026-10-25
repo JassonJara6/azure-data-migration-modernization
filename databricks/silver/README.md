@@ -99,3 +99,57 @@ Cobertura: sincronía con seed SQL, hashes/rutas/recibos, once esquemas, conserv
 No hay CDC/deletes incrementales, SCD2, Auto Loader, streaming, DLT/Lakeflow ni Gold. Los cambios que Bronze no capture (hard deletes o updates tardíos con el mismo cursor) no pueden reconstruirse en Silver. La base real informada es R1; no se infiere R2 ni una ejecución Silver real.
 
 Verificar SHA256/INT96 desde el driver añade lectura y trabajo por archivo; las relaciones y hashes requieren scans/shuffles. Adecuado para AdventureWorks/portafolio, no un diseño de petabytes. Los duplicados detectados bloquean en lugar de elegir un ganador. Un error de I/O/Parquet ilegible puede registrar solo el error de lote sin filas en cuarentena porque no hay filas decodificables. Los datos sensibles permanecen en Delta/volúmenes restringidos y no en logs. Políticas de retención, máscaras y optimización de archivos deben definirse tras medir la ejecución real, sin inventar infraestructura en este PR.
+
+## Diagnóstico de `committed_evidence`
+
+El operador informó Job Run `11937840542482`, Task Run `831744328908969`,
+`SILVER_RUNTIME_FAILED` en `committed_evidence`: el clúster y el notebook sí
+iniciaron. No se dispone aquí de la excepción original ni de acceso autenticado
+al volumen. **La causa exacta de esa ejecución no está determinada.** No se han
+cambiado permisos, rutas, recibos o métodos de acceso basándose en hipótesis.
+
+La etapa realiza exclusivamente estas operaciones, ahora en `admm_silver/evidence.py`:
+
+1. Abrir el recibo en `/Volumes/...` como texto UTF-8 (puede fallar por archivo
+   ausente, permisos o E/S).
+2. Leerlo y decodificar UTF-8 (puede fallar por E/S o bytes inválidos).
+3. Interpretar JSON con rechazo de claves duplicadas (puede fallar por JSON
+   malformado o incompleto).
+4. Exigir un objeto con `parent_run_id` textual y compararlo con el parent solicitado.
+
+Defecto reproducido: anteriormente `null`, arrays y objetos sin `parent_run_id`
+pasaban el parser JSON y provocaban `TypeError`/`KeyError` al indexarlos. Ahora se
+rechazan con `RECEIPT_OBJECT_REQUIRED` o `RECEIPT_PARENT_REQUIRED`. Esto demuestra
+un defecto de validación, **no que el recibo real tenga esa forma**. No se reparan,
+truncan ni sustituyen archivos. La validación completa COMMITTED, once tablas,
+hashes y manifiestos sigue en `pipeline.run`, antes de publicar datos Silver.
+
+El manejador del notebook emite un único JSON con `stage`, `error_code`,
+`error_type` y `location` (archivo relativo del paquete y línea exacta). Conserva
+`SILVER_RUNTIME_FAILED` como prefijo para excepciones inesperadas, añade ese mismo
+JSON seguro al error de la tarea (además de la salida de celda) y suprime el encadenamiento
+del error. Ejemplo de **formato ilustrativo, no evidencia de Databricks**:
+
+```json
+{"status":"FAILED","stage":"committed_evidence","error_code":"RUNTIME_FAILED","error_type":"PermissionError","location":{"file":"admm_silver/evidence.py","line":8}}
+```
+
+Se registra solo la ubicación más interna de código del paquete, no la traza
+completa. No se imprimen mensajes originales, rutas del recibo, JSON, filas,
+variables locales, credenciales ni rutas absolutas de instalación. Si el fallo
+ocurre fuera del paquete, `location` será `null` en lugar de exponer rutas ajenas.
+Los errores de contrato conservan códigos estáticos; mensajes no conformes se
+ocultan. Los diagnósticos son salida del notebook: una etapa que falla antes de
+`pipeline.run` no inventa una auditoría Delta ni escribe datos para registrar el error.
+
+Las pruebas locales incluyen E/S denegada/ausente/fallida, UTF-8 inválido, JSON
+malformado, claves duplicadas, estructuras inválidas y ejecución del manejador
+real del notebook con dependencias simuladas. Comprueban que no se inicia
+`pipeline.run` tras el fallo y que los datos privados no aparecen en el diagnóstico.
+No prueban permisos ni existencia de un archivo real en Unity Catalog.
+
+No se requiere ejecutar Silver para revisar este PR. Antes de autorizar cualquier
+nuevo intento, revisar código y pruebas. Si posteriormente se autoriza un nuevo
+run con esta versión, el JSON de salida de la tarea permitirá distinguir la
+operación y el tipo exacto de fallo; no hace falta habilitar trazas completas ni
+compartir el contenido del recibo.

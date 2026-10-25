@@ -17,6 +17,7 @@ import tempfile
 import urllib.parse
 import yaml
 from plan_guard import Blocked,require,review,sha,comparison_sha
+from capacity_reads import read_sku_catalog
 from compute_capacity import select_alternates,check_run_result
 from notebook_guard import verify_deployed_task
 from bundle_overlay import ephemeral_bundle
@@ -32,7 +33,7 @@ PARENT='20d65511-8190-41a0-8ad2-23d7568363d2'
 SOURCES={'Person.Person','Person.Address','Person.StateProvince','Person.CountryRegion','Production.Product','Production.ProductCategory','Production.ProductSubcategory','Sales.Customer','Sales.SalesOrderHeader','Sales.SalesOrderDetail','Sales.SalesTerritory'}
 
 
-def command(args,*,cwd=ROOT,env=None,json_output=False,allowed=(0,),interactive=False):
+def command(args,*,cwd=ROOT,env=None,json_output=False,allowed=(0,),interactive=False,timeout=None):
     # Never echo raw external error output: SDK/CLI messages may contain tokens.
     args=list(args)
     env=dict(os.environ if env is None else env,PYTHONUTF8='1',PYTHONIOENCODING='utf-8')
@@ -41,7 +42,9 @@ def command(args,*,cwd=ROOT,env=None,json_output=False,allowed=(0,),interactive=
     program=shutil.which(str(args[0])) or str(args[0])
     try:
         result=subprocess.run([program,*map(str,args[1:])],cwd=cwd,env=env,
-           text=True,encoding='utf-8',errors='strict',capture_output=not interactive)
+           text=True,encoding='utf-8',errors='strict',capture_output=not interactive,timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise Blocked('READ_TIMEOUT') from None
     except UnicodeError:
         raise Blocked('CLI_OUTPUT_NOT_UTF8') from None
     except FileNotFoundError:
@@ -132,7 +135,7 @@ class Launcher:
         try:return command(['databricks','api',method,path,'--profile',self.c.get('account_profile','admm-account')],env=self.account_env,json_output=True)
         except Blocked as exc:raise Blocked('ACCOUNT_ADMIN_OAUTH_OR_CONNECTIVITY_REQUIRED: '+str(exc)) from None
     def api(self,method,path):
-        return command(['databricks','api',method,path],env=self.ws_env,json_output=True)
+        return command(['databricks','api',method,path],env=self.ws_env,json_output=True,timeout=90 if method.lower()=='get' else None)
     def tf(self,root,*args,**kwargs):
         try:return command(['terraform','-chdir='+str(root),*args],env=self.env,**kwargs)
         except Blocked as exc:
@@ -320,11 +323,21 @@ class Launcher:
         require(any(n['node_type_id']==uc['node_type_id'] for n in nodes['node_types']),'NODE_TYPE_UNAVAILABLE')
         # All calls are read-only. Catalog availability is not live capacity.
         self.preflight_step='bundle_schema'
-        schema=command(['databricks','bundle','schema'],env=self.ws_env,json_output=True)
+        schema=command(['databricks','bundle','schema'],env=self.ws_env,json_output=True,timeout=90)
         self.preflight_step='azure_skus'
-        skus=command(['az','vm','list-skus','--location','eastus','--resource-type','virtualMachines','--subscription',SUBSCRIPTION,'--all','--output','json'],env=self.env,json_output=True)
+        def read_page(argv,stage,timeout):
+            try:return command(argv,env=self.env,json_output=True,timeout=timeout)
+            except Blocked as exc:
+                code=str(exc)
+                if code!='READ_TIMEOUT':
+                    try:code=json.loads(code).get('code')
+                    except (ValueError,AttributeError):code=None
+                if code in ('READ_TIMEOUT','CONNECTIVITY_FAILED','DNS_FAILED'):
+                    raise Blocked(code+'_AT_'+stage) from None
+                raise
+        skus=read_sku_catalog(read_page,progress=lambda event:print(json.dumps(event),file=sys.stderr,flush=True))
         self.preflight_step='azure_quotas'
-        usages=command(['az','vm','list-usage','--location','eastus','--subscription',SUBSCRIPTION,'--output','json'],env=self.env,json_output=True)
+        usages=command(['az','vm','list-usage','--location','eastus','--subscription',SUBSCRIPTION,'--output','json'],env=self.env,json_output=True,timeout=120)
         require(isinstance(usages,list),'INVALID_AZURE_QUOTAS_RESPONSE')
         self.preflight_step='compute_policy'
         policy=self.api('get','/api/2.0/policies/clusters/get?policy_id='+urllib.parse.quote(uc['policy_id'],safe=''))

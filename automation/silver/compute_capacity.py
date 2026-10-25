@@ -65,6 +65,7 @@ def _select_alternates(primary,nodes,skus,policy,schema,usages,report):
             sku=matches[0]
             capabilities=sku.get('capabilities')
             require(isinstance(capabilities,list) and all(isinstance(c,dict) and isinstance(c.get('name'),str) for c in capabilities),'INVALID_AZURE_SKU_CAPABILITIES')
+            require(len({c['name'] for c in capabilities})==len(capabilities),'INVALID_AZURE_SKU_DUPLICATE_CAPABILITY')
             caps={c['name']:c.get('value') for c in capabilities}
             locations=sku.get('locations');restrictions=sku.get('restrictions')
             require(isinstance(locations,list) and isinstance(restrictions,list) and all(isinstance(r,dict) for r in restrictions),'INVALID_AZURE_SKU_LOCATIONS_OR_RESTRICTIONS')

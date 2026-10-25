@@ -55,7 +55,7 @@ def test_exact_io_line_and_nonstatic_error_code_redacted(tmp_path):
     import inspect
     from admm_silver import evidence
     source,start=inspect.getsourcelines(evidence.load_committed_evidence)
-    expected=start+next(i for i,line in enumerate(source) if 'with open(' in line)
+    expected=start+next(i for i,line in enumerate(source) if "raise SilverError('RECEIPT_FILE_NOT_FOUND')" in line)
     with pytest.raises(SilverError,match='RECEIPT_FILE_NOT_FOUND') as caught:load_committed_evidence(tmp_path/'missing.json',PARENT)
     assert failure_report(caught.value,'committed_evidence')['location']=={'file':'admm_silver/evidence.py','line':expected}
     assert failure_report(SilverError('synthetic secret message'),'committed_evidence')['error_code']=='RUNTIME_FAILED'

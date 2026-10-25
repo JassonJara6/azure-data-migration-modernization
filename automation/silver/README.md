@@ -149,3 +149,7 @@ comparte la selección real del launcher y explica cada candidato y cuota.
 La corrección del [issue #33](ISSUE-33.md) elimina la dependencia del catálogo
 completo de SKU ARM. Usa evidencia explícita del proveedor de Databricks,
 identidad/región ARM del workspace y cuotas reales; campos ausentes bloquean.
+
+Para actualizar un wheel/notebook antiguo sin arrancar cómputo, usar la
+[guía de publicación y verificación Silver](SILVER-RELEASE.md). La publicación
+no implica capacidad disponible ni éxito Silver; la ejecución conserva su gate.

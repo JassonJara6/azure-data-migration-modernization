@@ -1,6 +1,21 @@
 # Databricks notebook source
 # One Job invocation performs preflight, publication and a no-write replay check.
 import json
+from importlib import metadata
+
+# Check installed distribution before importing project modules from a stale wheel.
+dbutils.widgets.text('expected_package_version','0.1.0')
+def _package_failure(code,kind):
+    diagnostic={'status':'FAILED','stage':'package_preflight','error_code':code,'error_type':kind}
+    print(json.dumps(diagnostic,sort_keys=True))
+    raise RuntimeError('SILVER_'+code+' '+json.dumps(diagnostic,sort_keys=True)) from None
+
+try:
+    installed_version=metadata.version('admm-silver')
+    expected_version=dbutils.widgets.get('expected_package_version')
+except Exception as exc:
+    _package_failure('PACKAGE_NOT_INSTALLED' if isinstance(exc,metadata.PackageNotFoundError) else 'PACKAGE_VERSION_UNREADABLE',type(exc).__name__)
+if installed_version!=expected_version:_package_failure('PACKAGE_VERSION_MISMATCH','RuntimeError')
 from admm_silver.contracts import require,identifier,TABLES
 from admm_silver.evidence import load_committed_evidence
 from admm_silver.diagnostics import failure_report

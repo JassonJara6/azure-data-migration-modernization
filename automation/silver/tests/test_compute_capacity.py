@@ -97,7 +97,7 @@ def test_launcher_read_only_preflight_propagates_selected_driver_list(monkeypatc
     def command(argv,**kwargs):
         calls.append(argv)
         if argv[1:3]==['bundle','schema']:return SCHEMA
-        if argv[1:3]==['vm','list-skus']:return a[2]
+        if argv[1]=='rest':return {'value':a[2]}
         if argv[1:3]==['vm','list-usage']:return quotas
         pytest.fail('Unexpected CLI mutation')
     def api(method,path):

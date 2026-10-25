@@ -83,7 +83,7 @@ def test_readonly_entrypoint_only_uses_read_commands():
         if argv[1:3]==['account','show']:return {'id':SUBSCRIPTION,'tenantId':TENANT},None
         if argv[1:3]==['jobs','get']:return {'settings':{'job_clusters':[{'new_cluster':cluster}]}},None
         if argv[1:3]==['bundle','schema']:return SCHEMA,None
-        if argv[1:3]==['vm','list-skus']:return a[2],None
+        if argv[1]=='rest':return {'value':a[2]},None
         if argv[1:3]==['vm','list-usage']:return quotas(),None
         if argv[1:3]==['api','get']:return (a[1] if 'list-node-types' in argv[3] else a[3]),None
         pytest.fail('Unexpected command')
@@ -103,7 +103,7 @@ def test_null_live_quota_response_never_enables_catalog_only_mode(monkeypatch):
         pytest.fail('Must block before policy read')
     def command(argv,**kwargs):
         if argv[1:3]==['bundle','schema']:return SCHEMA
-        if argv[1:3]==['vm','list-skus']:return inputs()[2]
+        if argv[1]=='rest':return {'value':inputs()[2]}
         if argv[1:3]==['vm','list-usage']:return None
         pytest.fail('Unexpected command')
     obj.api=api;monkeypatch.setattr(launch,'command',command)
@@ -111,7 +111,8 @@ def test_null_live_quota_response_never_enables_catalog_only_mode(monkeypatch):
         obj.check_workspace(dict(metastore_id='m',node_type_id=PRIMARY))
 
 
-def test_launcher_emits_per_candidate_report_on_selection_failure(monkeypatch,capsys):
+@pytest.mark.parametrize('transient',[False,True])
+def test_launcher_emits_per_candidate_report_on_selection_failure(monkeypatch,capsys,transient):
     import launch
     a=inputs()
     obj=object.__new__(launch.Launcher);obj.env={};obj.ws_env={}
@@ -121,13 +122,26 @@ def test_launcher_emits_per_candidate_report_on_selection_failure(monkeypatch,ca
         if path.endswith('list-node-types'):return a[1]
         if '/policies/' in path:return a[3]
         pytest.fail('Must block before volume checks')
+    attempts=[]
     def command(argv,**kwargs):
         if argv[1:3]==['bundle','schema']:return SCHEMA
-        if argv[1:3] in (['vm','list-skus'],['vm','list-usage']):return []
+        if argv[1]=='rest':
+            attempts.append(argv)
+            if transient and len(attempts)==1:raise Blocked(json.dumps({'code':'CONNECTIVITY_FAILED'}))
+            return {'value':[]}
+        if argv[1:3]==['vm','list-usage']:return []
         pytest.fail('No writes permitted')
     obj.api=api;monkeypatch.setattr(launch,'command',command)
     with pytest.raises(Blocked,match='NO_ELIGIBLE'):
         obj.check_workspace(dict(metastore_id='m',node_type_id=PRIMARY,policy_id='p'))
-    report=json.loads(capsys.readouterr().out)
+    report=json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert len(attempts)==(2 if transient else 1)
     assert len(report['candidates'])==2
     assert all(c['reasons']==['NOT_IN_AZURE_SKU_CATALOG'] and c['actions'] for c in report['candidates'])
+
+
+def test_contradictory_duplicate_capabilities_fail_closed():
+    a=inputs();a[2][1]['capabilities'].append({'name':'vCPUs','value':'8'})
+    report=evaluate(a)
+    assert report['blocker']=='INVALID_AZURE_SKU_DUPLICATE_CAPABILITY'
+    assert report['status']=='BLOCKED'

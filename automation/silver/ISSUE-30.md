@@ -97,3 +97,78 @@ output; this PR does not request another paid run to obtain it.
 - [Azure quota versus physical capacity](https://learn.microsoft.com/en-us/azure/virtual-machines/quotas)
 - [Azure Resource SKU restriction scope](https://learn.microsoft.com/en-us/rest/api/compute/resource-skus/list)
 - [Unity Catalog volume requirements and limitations](https://learn.microsoft.com/en-us/azure/databricks/volumes/)
+
+## PR #32 takeover: bounded reads and offline acceptance
+
+The reported `READ_TIMEOUT` established only that a CLI read exceeded its local
+limit, not a VM stockout or quota denial. PR #32's original timeout increase was
+untested. This revision keeps its configurable `read_json` timeout (other
+consumers still default to 60 seconds), but replaces the opaque full-catalog
+CLI enumeration with shared explicit ARM Resource SKU GET pagination in both
+`check_capacity.py` and the launcher. Only the documented East US location filter
+is sent; unsupported server-side SKU-name filters are not invented.
+
+Catalog rules:
+
+- 60 seconds maximum per page attempt, 180 seconds for the complete catalog,
+  at most 100 pages; the smaller remaining budget is enforced on each subprocess.
+- One retry of the **same GET page**, only on an identified timeout/connectivity/
+  DNS failure. Authentication, malformed JSON and access denial are not retried.
+  There are no compute or Job retries.
+- Validate every page and follow `nextLink` only on HTTPS ARM, the exact project
+  subscription/SKU endpoint and the pinned API version. Reject repeated,
+  off-endpoint, malformed or excessive links. Never print pagination tokens.
+- A partial catalog is never passed to selection: later-page failure, elapsed
+  budget or page-limit exhaustion blocks the check, even if a reviewed VM was
+  present on an earlier page.
+- Progress JSON goes to stderr with stage/page/attempt/count only. The diagnostic
+  retains a single final JSON report on stdout, with static stage-suffixed error
+  codes. Other read steps are bounded at 90 seconds, quota usage at 120 seconds.
+  These are read limits, not a promise that Azure will respond within them.
+
+Realistic page-envelope fixtures, multiple pages, slow subprocesses, transient
+failures, malformed Job/CLI responses, legacy injected readers and unsafe error
+payloads are tested offline. A second demonstrable ambiguity was fixed: duplicate
+SKU capability names are rejected instead of letting the last value silently
+replace an earlier CPU/memory declaration. No live claim follows from mocks.
+
+Official pagination contract:
+[Resource SKUs List, API 2021-07-01](https://learn.microsoft.com/en-us/rest/api/compute/resource-skus/list?view=rest-compute-2021-07-01).
+
+### Evidence and remaining gates
+
+- [x] Review PR #32 candidate patch and issue #30; add executable regression tests.
+- [x] Keep primary/alternate compatibility, policy restrictions, quota requirements,
+  cost envelope, approvals and read-only command behavior.
+- [x] Run local automation, Spark/Delta and Terraform provider-mock plan checks.
+- [x] Preserve committed-evidence diagnostics and complete UTF-8 driver reads;
+  do not replace access methods or grants without evidence.
+- [ ] Read the real subscription/workspace catalog and quota snapshot. This Codex
+  environment exposes no Azure/Databricks identity, capabilities or authenticated
+  workspace connector, so that observation is unavailable here.
+- [ ] Inspect the old Databricks task's original exception and prove runner
+  USE_CATALOG/USE_SCHEMA, READ_VOLUME and FUSE access in its actual context.
+  No authorized authenticated task-output reader is available here. Neither a
+  local receipt nor an operator's grant listing proves those runtime conditions.
+- [ ] End-to-end Silver success, reconciled metrics and replay acceptance. These
+  require a separately authorized real run; this PR never runs or requests one.
+
+The existing single read-only command above remains available if a final live
+check is later authorized. No sequence of speculative operator diagnostics is
+required to review this PR. No deployments, paid runs, cloud writes, Bronze
+changes, identity changes or permission changes were performed.
+
+### Final local verification commands and results
+
+Executed in the Codex Linux workspace with cached Python dependencies, pinned
+Delta JARs and Terraform 1.9.8; no cloud credentials were configured:
+
+- `SILVER_WHEEL_BUILD_TESTS=1 SILVER_PROVIDER_AUTH_TESTS=1 SILVER_TERRAFORM_BIN=/workspace/work/infrastructure/bin/terraform PYTHONPATH=/workspace/work/silver/deps python -m pytest -q automation/silver/tests --tb=short` — **233 passed**, no skips.
+- `SILVER_DELTA_JARS=/workspace/work/silver/jars/delta-spark_2.12-3.2.1.jar,/workspace/work/silver/jars/delta-storage-3.2.1.jar PYTHONPATH=/workspace/work/silver/deps:/workspace/work/silver/bronze-deps python -m pytest -q databricks/silver/tests --tb=short` — **47 passed**, no skips.
+- Terraform `fmt -check -recursive` for the four existing roots; `validate -no-color`
+  and `test -no-color` in each — four valid configurations, **12 mock-provider
+  plan tests passed**, no `apply` or real backend access.
+- `python -m compileall -q automation/silver databricks/silver/src databricks/silver/tools databricks/silver/notebooks` and `git diff --check` — passed.
+
+These commands record local evidence, not instructions to run diagnostics or
+paid compute. Linux mocks do not establish native Windows or live FUSE behavior.

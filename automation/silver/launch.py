@@ -35,12 +35,15 @@ SOURCES={'Person.Person','Person.Address','Person.StateProvince','Person.Country
 def command(args,*,cwd=ROOT,env=None,json_output=False,allowed=(0,),interactive=False):
     # Never echo raw external error output: SDK/CLI messages may contain tokens.
     args=list(args)
+    env=dict(os.environ if env is None else env,PYTHONUTF8='1',PYTHONIOENCODING='utf-8')
     if str(args[0])=='databricks' and env and env.get('DATABRICKS_CONFIG_PROFILE') and '--profile' not in args:
         args+=['--profile',env['DATABRICKS_CONFIG_PROFILE']]
     program=shutil.which(str(args[0])) or str(args[0])
     try:
         result=subprocess.run([program,*map(str,args[1:])],cwd=cwd,env=env,
-           text=True,capture_output=not interactive)
+           text=True,encoding='utf-8',errors='strict',capture_output=not interactive)
+    except UnicodeError:
+        raise Blocked('CLI_OUTPUT_NOT_UTF8') from None
     except FileNotFoundError:
         raise Blocked('TOOL_MISSING_'+Path(str(args[0])).stem.upper()) from None
     if result.returncode not in allowed:
@@ -303,21 +306,31 @@ class Launcher:
         require(len(matches)<=1,'WORKSPACE_ASSIGNMENT_AMBIGUOUS')
         return {'metastore_id':matches[0]} if matches else None
     def check_workspace(self,uc):
+        self.preflight_step='metastore_summary'
         current=self.api('get','/api/2.1/unity-catalog/metastore_summary')
+        require(isinstance(current,dict) and isinstance(current.get('metastore_id'),str),'INVALID_METASTORE_SUMMARY_RESPONSE')
         require(current['metastore_id']==uc['metastore_id'],'WORKSPACE_METASTORE_MISMATCH')
+        self.preflight_step='spark_versions'
         versions=self.api('get','/api/2.0/clusters/spark-versions')
+        require(isinstance(versions,dict) and isinstance(versions.get('versions'),list) and all(isinstance(v,dict) and isinstance(v.get('key'),str) for v in versions['versions']),'INVALID_SPARK_VERSIONS_RESPONSE')
         require(any(v['key']=='15.4.x-scala2.12' for v in versions['versions']),'DBR_15_4_UNAVAILABLE')
+        self.preflight_step='node_types'
         nodes=self.api('get','/api/2.0/clusters/list-node-types')
+        require(isinstance(nodes,dict) and isinstance(nodes.get('node_types'),list) and all(isinstance(n,dict) and isinstance(n.get('node_type_id'),str) for n in nodes['node_types']),'INVALID_NODE_TYPES_RESPONSE')
         require(any(n['node_type_id']==uc['node_type_id'] for n in nodes['node_types']),'NODE_TYPE_UNAVAILABLE')
         # All calls are read-only. Catalog availability is not live capacity.
+        self.preflight_step='bundle_schema'
         schema=command(['databricks','bundle','schema'],env=self.ws_env,json_output=True)
         skus=command(['az','vm','list-skus','--location','eastus','--resource-type','virtualMachines','--subscription',SUBSCRIPTION,'--all','--output','json'],env=self.env,json_output=True)
         usages=command(['az','vm','list-usage','--location','eastus','--subscription',SUBSCRIPTION,'--output','json'],env=self.env,json_output=True)
+        self.preflight_step='compute_policy'
         policy=self.api('get','/api/2.0/policies/clusters/get?policy_id='+urllib.parse.quote(uc['policy_id'],safe=''))
+        self.preflight_step='select_alternates'
         uc['driver_alternate_node_type_ids']=select_alternates(uc['node_type_id'],nodes,skus,policy,schema,usages)
         print(json.dumps({'status':'SILVER_COMPUTE_PREFLIGHT','primary':uc['node_type_id'],
             'driver_alternates':uc['driver_alternate_node_type_ids'],'region':'eastus',
             'live_capacity':'NOT_GUARANTEED','quota':'REGIONAL_AND_FAMILY_SNAPSHOT_CHECKED'}))
+        self.preflight_step='input_volume_permissions'
         for volume in ('bronze','receipts'):
             name=uc['catalog']+'.inputs.'+volume
             permissions=self.api('get','/api/2.1/unity-catalog/permissions/volume/'+name)
@@ -325,6 +338,7 @@ class Launcher:
             runner=next((g for g in grants if g['principal']==uc['runner_application_id']),None)
             require(runner and set(runner['privileges'])=={'READ_VOLUME'},'RUNNER_INPUT_PERMISSIONS_MISMATCH')
             require(not any('WRITE_VOLUME' in g.get('privileges',[]) and g['principal']!=uc['operator'] for g in grants),'UNEXPECTED_RECEIPT_OR_BRONZE_WRITER')
+        self.preflight_step=None
         # Notebook additionally validates the exact external-volume URI and real
         # file hashes under the RUN-AS principal, not this operator identity.
     def deploy_job(self,workspace,uc):
@@ -487,6 +501,17 @@ def main():
         print('INTERRUPTED: use --stop to cancel a recorded running Job.',file=sys.stderr);return 130
     except Exception as exc:
         code=str(exc) if isinstance(exc,Blocked) else 'LOCAL_OR_RUNTIME_FAILURE'
-        print(json.dumps({'status':'BLOCKED','code':code,'error_type':type(exc).__name__}),file=sys.stderr);return 1
+        diagnostic={'status':'BLOCKED','code':code,'error_type':type(exc).__name__}
+        # Code locations only: never format exception messages, source lines or locals.
+        frames=[];tb=exc.__traceback__
+        while tb:
+            path=Path(tb.tb_frame.f_code.co_filename).resolve()
+            if path.is_relative_to(ROOT/'automation/silver'):
+                frames.append({'file':path.relative_to(ROOT).as_posix(),'line':tb.tb_lineno})
+            tb=tb.tb_next
+        diagnostic['locations']=frames
+        if 'launch' in locals() and getattr(launch,'preflight_step',None):
+            diagnostic['preflight_step']=launch.preflight_step
+        print(json.dumps(diagnostic),file=sys.stderr);return 1
 
 if __name__=='__main__':raise SystemExit(main())

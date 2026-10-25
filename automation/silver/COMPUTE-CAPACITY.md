@@ -103,3 +103,41 @@ snapshots, fixed-policy compatibility, driver-only configuration and sanitized
 failure diagnostics. Actual allocation and processing of the 11 sources remain
 pending an authorized real run. No Terraform, Unity Catalog, Bronze, credentials,
 ADF or R2 changes are part of this fix.
+
+## Safe diagnostics for local preflight failures
+
+The reported Windows `TypeError` after Terraform `changes: []` has **not been
+reproduced with production Azure/Databricks responses**. The official CLI v1.22.1
+binary was exercised locally: `bundle schema` returns valid JSON and the existing
+flexibility detector succeeds on that complete schema. A CLI downgrade is not
+justified by that evidence. No authenticated Azure/Databricks queries were run.
+
+The previous implementation assumed collection fields were always non-null,
+quota counts were Python numbers, and policy definition was always a JSON string.
+Synthetic variants with null schema properties, null memory/capability fields,
+string quota counts or an already-decoded policy object reproduce exceptions.
+These are regression inputs, **not a claim about the failing operator response**.
+The preflight now validates shapes and numerical values explicitly, accepts
+numeric strings and decoded policy objects, and blocks incomplete/malformed
+capacity evidence with field-specific codes. It never substitutes missing quotas
+with an assumption of capacity.
+
+Subprocesses explicitly decode UTF-8 with strict errors; Python-based CLIs inherit
+`PYTHONUTF8=1` and `PYTHONIOENCODING=utf-8`. This avoids dependence on Windows
+cp1252 defaults without requiring changes to the shell or login profiles. Invalid
+UTF-8 produces `CLI_OUTPUT_NOT_UTF8`, never replacement-decoded JSON.
+
+For unexpected exceptions, the final JSON includes `preflight_step` plus
+repository-relative `locations` containing file and line numbers. It deliberately
+omits exception messages, source code lines, local variables, absolute paths,
+command arguments, raw CLI responses and exception chaining. A subsequent failure
+can therefore identify its exact code location without printing a traceback.
+Remove the operator's temporary `traceback.print_exc()` modification when adopting
+this version; it is unnecessary and can expose sensitive response details. No
+such temporary modification was present in the clean checkout used for this PR.
+
+After merging, the existing approved launcher command requires no extra encoding
+variables. Its preflight remains read-only, but `--deploy` still proceeds into
+saved-plan application and real Job execution after the existing approvals. This
+PR does not authorize or perform those operations. If preflight still fails, the
+safe JSON location is the evidence needed to investigate the actual failing line.

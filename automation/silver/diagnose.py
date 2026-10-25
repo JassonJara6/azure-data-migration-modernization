@@ -1,6 +1,7 @@
 """Read-only bootstrap diagnostics. Never log raw CLI output or acquire/export tokens."""
 import fnmatch
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -42,10 +43,13 @@ def read_json(args):
     if not program:
         return None, {'code': 'TOOL_MISSING', 'tool': args[0]}
     try:
-        result = subprocess.run([program, *args[1:]], text=True, capture_output=True,
-                                timeout=60, shell=False)
+        result = subprocess.run([program, *args[1:]], text=True, encoding='utf-8', errors='strict', capture_output=True,
+                                timeout=60, shell=False,
+                                env=dict(os.environ,PYTHONUTF8='1',PYTHONIOENCODING='utf-8'))
     except subprocess.TimeoutExpired:
         return None, {'code': 'READ_TIMEOUT'}
+    except UnicodeError:
+        return None, {'code': 'CLI_OUTPUT_NOT_UTF8'}
     except OSError:
         return None, {'code': 'TOOL_START_FAILED'}
     if result.returncode:

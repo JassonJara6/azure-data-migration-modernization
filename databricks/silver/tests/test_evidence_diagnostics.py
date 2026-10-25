@@ -41,7 +41,9 @@ def test_io_and_parse_diagnostics_hide_sensitive_details(tmp_path,monkeypatch,ki
     monkeypatch.setattr(builtins,'open',open_mock)
     with pytest.raises(Exception) as caught:load_committed_evidence(path,PARENT)
     report=failure_report(caught.value,'committed_evidence')
-    assert report['error_type']==expected and report['stage']=='committed_evidence'
+    assert report['error_type']==('SilverError' if kind in ('missing','permission','read','encoding') else expected) and report['stage']=='committed_evidence'
+    if kind in ('missing','permission','read','encoding'):
+        assert report['error_code']=={'missing':'RECEIPT_FILE_NOT_FOUND','permission':'RECEIPT_FILE_ACCESS_DENIED','read':'RECEIPT_FILE_IO_FAILED','encoding':'RECEIPT_INVALID_UTF8'}[kind]
     assert report['location']['file'] in ('admm_silver/evidence.py','admm_silver/contracts.py')
     assert report['location']['line']>0
     serialized=json.dumps(report)
@@ -53,8 +55,8 @@ def test_exact_io_line_and_nonstatic_error_code_redacted(tmp_path):
     import inspect
     from admm_silver import evidence
     source,start=inspect.getsourcelines(evidence.load_committed_evidence)
-    expected=start+next(i for i,line in enumerate(source) if 'with open(' in line)
-    with pytest.raises(FileNotFoundError) as caught:load_committed_evidence(tmp_path/'missing.json',PARENT)
+    expected=start+next(i for i,line in enumerate(source) if "raise SilverError('RECEIPT_FILE_NOT_FOUND')" in line)
+    with pytest.raises(SilverError,match='RECEIPT_FILE_NOT_FOUND') as caught:load_committed_evidence(tmp_path/'missing.json',PARENT)
     assert failure_report(caught.value,'committed_evidence')['location']=={'file':'admm_silver/evidence.py','line':expected}
     assert failure_report(SilverError('synthetic secret message'),'committed_evidence')['error_code']=='RUNTIME_FAILED'
 
@@ -74,13 +76,13 @@ def test_notebook_reports_evidence_failure_before_pipeline(monkeypatch,capsys):
     def denied(*a,**k):raise PermissionError('synthetic-secret credentials detail')
     monkeypatch.setattr(evidence,'open',denied,raising=False)
     notebook=Path(__file__).resolve().parents[1]/'notebooks/run_silver.py'
-    with pytest.raises(RuntimeError,match='^SILVER_RUNTIME_FAILED ') as raised:
+    with pytest.raises(RuntimeError,match='^SILVER_RECEIPT_FILE_ACCESS_DENIED ') as raised:
         exec(compile(notebook.read_text(),str(notebook),'exec'),{'dbutils':dbutils,'spark':spark})
     output=capsys.readouterr().out
     report=json.loads(output)
     assert json.loads(str(raised.value).split(' ',1)[1])==report
     assert 'synthetic-' not in str(raised.value)
-    assert report['stage']=='committed_evidence' and report['error_type']=='PermissionError'
+    assert report['stage']=='committed_evidence' and report['error_type']=='SilverError' and report['error_code']=='RECEIPT_FILE_ACCESS_DENIED'
     assert report['location']['file']=='admm_silver/evidence.py'
     assert 'synthetic-' not in output and 'credentials' not in output
 

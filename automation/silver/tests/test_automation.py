@@ -140,6 +140,9 @@ def test_overlay_matches_actual_pr18_configuration():
     original=yaml.safe_load((Path(__file__).parent/'fixtures/pr18-bundle.yml').read_text())
     spec=ephemeral_bundle(original,dict(runner_application_id='00000000-0000-0000-0000-000000000001',policy_id='policy',node_type_id='Standard_D4ds_v5',operator='operator@example.invalid'),'https://workspace.example.invalid')
     task=spec['resources']['jobs']['silver']['tasks'][0]
+    assert spec['sync']['include']==['notebooks/run_silver.py']
+    assert task['notebook_task']['source']=='WORKSPACE'
+    assert task['notebook_task']['notebook_path']=='./notebooks/run_silver.py'
     assert task['notebook_task']['base_parameters']['replay_check']=='true'
     assert 'whl' in task['libraries'][0]
 
@@ -239,7 +242,9 @@ def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch,workspac
             Path(args[args.index('--output')+1]).write_text(json.dumps({'parent_run_id':parent}))
         elif args[1:3]==['fs','ls']:return []
         elif args[1:3]==['bundle','summary']:return {'resources':{'jobs':{'silver':{'id':'7'}}}}
-        elif args[1:3]==['workspace','get-status']:return {'object_type':'DIRECTORY','object_id':1}
+        elif args[1:3]==['jobs','get']:return {'settings':{'tasks':[{'task_key':'transform_and_verify','notebook_task':{'notebook_path':'/Workspace/Shared/admm_dev/admm-silver/dev/files/notebooks/run_silver'},'libraries':[{'whl':'/Workspace/Shared/admm_dev/admm-silver/dev/artifacts/code.whl'}]}]}}
+        elif args[1:3]==['permissions','get']:return {'access_control_list':[{'service_principal_name':'runner','all_permissions':[{'permission_level':'CAN_READ','inherited':True}]}]}
+        elif args[1:3]==['workspace','get-status']:return {'object_type':'NOTEBOOK' if args[3].endswith('run_silver') else 'FILE' if args[3].endswith('.whl') else 'DIRECTORY','object_id':1}
         elif args[1:3]==['jobs','run-now']:return {'run_id':37}
         return ''
     def api(method,path):
@@ -260,7 +265,12 @@ def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch,workspac
     assert (stage/'dist/stale.whl').read_bytes()==b'old wheel must not be used'
     assert (stage/'.databricks/state-marker').read_text()=='keep deployment identity'
     assert accepted['run_id']==37 and accepted['parent_run_id']==parent and len(accepted['metrics'])==11
-    assert any(args[1:4]==['permissions','update','directories'] for args in seen)
+    assert len([args for args in seen if args[1:4]==['permissions','update','directories']])==2
+    status_paths=[args[3] for args in seen if args[1:3]==['workspace','get-status']]
+    assert '/Shared/admm_dev/admm-silver/dev' not in status_paths
+    preflight=max(i for i,args in enumerate(seen) if args[1:3]==['permissions','get'])
+    submitted=next(i for i,args in enumerate(seen) if args[1:3]==['jobs','run-now'])
+    assert preflight<submitted
     assert not any('--overwrite' in args for args in seen)
     if workspace_mode:
         delegated=next(i for i,c in enumerate(seen) if c==['run-as-recheck'])

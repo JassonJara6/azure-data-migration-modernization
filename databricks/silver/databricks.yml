@@ -17,6 +17,11 @@ variables:
   parent_run_id:
     default: 20d65511-8190-41a0-8ad2-23d7568363d2
 
+sync:
+  # Explicit inclusion also works when a staging bundle lives under ignored work/.
+  include:
+    - notebooks/run_silver.py
+
 artifacts:
   silver_wheel:
     type: whl
@@ -39,6 +44,7 @@ resources:
           existing_cluster_id: ${var.existing_cluster_id}
           max_retries: 0
           notebook_task:
+            source: WORKSPACE
             notebook_path: ./notebooks/run_silver.py
             base_parameters:
               catalog: ${var.catalog}

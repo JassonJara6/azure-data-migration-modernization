@@ -321,12 +321,15 @@ class Launcher:
         # All calls are read-only. Catalog availability is not live capacity.
         self.preflight_step='bundle_schema'
         schema=command(['databricks','bundle','schema'],env=self.ws_env,json_output=True)
+        self.preflight_step='azure_skus'
         skus=command(['az','vm','list-skus','--location','eastus','--resource-type','virtualMachines','--subscription',SUBSCRIPTION,'--all','--output','json'],env=self.env,json_output=True)
+        self.preflight_step='azure_quotas'
         usages=command(['az','vm','list-usage','--location','eastus','--subscription',SUBSCRIPTION,'--output','json'],env=self.env,json_output=True)
+        require(isinstance(usages,list),'INVALID_AZURE_QUOTAS_RESPONSE')
         self.preflight_step='compute_policy'
         policy=self.api('get','/api/2.0/policies/clusters/get?policy_id='+urllib.parse.quote(uc['policy_id'],safe=''))
         self.preflight_step='select_alternates'
-        uc['driver_alternate_node_type_ids']=select_alternates(uc['node_type_id'],nodes,skus,policy,schema,usages)
+        uc['driver_alternate_node_type_ids']=select_alternates(uc['node_type_id'],nodes,skus,policy,schema,usages,reporter=lambda report:print(json.dumps(report,sort_keys=True)))
         print(json.dumps({'status':'SILVER_COMPUTE_PREFLIGHT','primary':uc['node_type_id'],
             'driver_alternates':uc['driver_alternate_node_type_ids'],'region':'eastus',
             'live_capacity':'NOT_GUARANTEED','quota':'REGIONAL_AND_FAMILY_SNAPSHOT_CHECKED'}))

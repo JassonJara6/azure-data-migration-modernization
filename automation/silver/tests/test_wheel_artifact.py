@@ -111,6 +111,8 @@ def test_real_wheel_is_reproducible_and_contains_only_current_package(tmp_path):
     first=artifact.build_wheel(ROOT/'databricks/silver',stage,'1700000000',env,run)
     second=artifact.build_wheel(ROOT/'databricks/silver',stage,'1700000000',env,run)
     assert first!=second and first.name==second.name and sha(first)==sha(second)
+    assert first.name=='admm_silver-'+artifact.source_version(ROOT/'databricks/silver')+'-py3-none-any.whl'
+    assert artifact.wheel_version(first)==artifact.source_version(ROOT/'databricks/silver')
     with zipfile.ZipFile(second) as wheel:
         assert 'admm_silver/contract.json' in wheel.namelist()
         assert not any('obsolete' in name for name in wheel.namelist())
@@ -124,3 +126,13 @@ def test_replaced_manifest_cannot_select_an_older_exact_wheel(tmp_path):
     (stage/'databricks.yml').write_text(yaml.safe_dump(config))
     with pytest.raises(Blocked,match='FRESH_WHEEL_SELECTION_CHANGED'):
         launch.deployment_sha(stage,expected_wheel=fresh)
+
+
+@pytest.mark.parametrize('version',['0.1.0+000000000000','0.1.0+111111111111'])
+def test_built_wheel_metadata_must_match_filename(tmp_path,version):
+    path=tmp_path/'admm_silver-0.1.0+000000000000-py3-none-any.whl'
+    with zipfile.ZipFile(path,'w') as wheel:
+        wheel.writestr('admm_silver.dist-info/METADATA','Name: admm-silver\nVersion: '+version+'\n')
+    if '111' in version:
+        with pytest.raises(Blocked,match='WHEEL_VERSION'):artifact.wheel_version(path)
+    else:assert artifact.wheel_version(path)==version

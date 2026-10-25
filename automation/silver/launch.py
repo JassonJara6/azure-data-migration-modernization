@@ -18,10 +18,11 @@ import urllib.parse
 import yaml
 from plan_guard import Blocked,require,review,sha,comparison_sha
 from capacity_reads import read_scoped_skus
-from compute_capacity import select_alternates,check_run_result
-from notebook_guard import verify_deployed_task
+from compute_capacity import select_alternates,check_run_result,ALTERNATES
+from runtime_report import safe_task_failure
+from notebook_guard import verify_deployed_task,notebook_signature
 from bundle_overlay import ephemeral_bundle
-from wheel_artifact import build_wheel,pin_wheel,selected_wheel
+from wheel_artifact import build_wheel,pin_wheel,selected_wheel,wheel_version
 from diagnose import diagnose, safe_failure, SUBSCRIPTION, TENANT
 from workspace_uc import ensure_workspace_state, profile_environment, verify_assignment, verify_runner, verify_run_as
 
@@ -277,7 +278,9 @@ class Launcher:
         try:
             self.init(UC_WORKSPACE)
             ensure_workspace_state(state_resources(self.tf(UC_WORKSPACE,'show','-json',json_output=True)),operator)
-            if self.deploy and self.stage!='uc':
+            if getattr(self,'deploy_only',False):
+                applied=True # Read existing outputs only; never plan/apply UC for artifact publication.
+            elif self.deploy and self.stage!='uc':
                 applied=self.plan(UC_WORKSPACE,'uc-workspace',variables,
                     before_apply=lambda:self.verify_workspace_run_as(workspace,selected,operator,runner))
             else:
@@ -288,6 +291,10 @@ class Launcher:
         if not runner:
             print(json.dumps({'status':'UC_FOUNDATION_CONFIGURED','silver':'BLOCKED_EXISTING_RUNNER_AND_RUN_AS_DELEGATION_REQUIRED'}))
             return None
+        if getattr(self,'deploy_only',False):
+            require(output['runner_application_id']==runner and output['metastore_id']==selected and
+                output['node_type_id']==variables['node_type_id'] and output['catalog']==variables['catalog_name'] and
+                output['operator'].lower()==operator.lower(),'EXISTING_UC_OUTPUT_CONFIG_MISMATCH')
         self.check_workspace(output)
         if self.stage=='uc':
             print(json.dumps({'status':'UC_CONFIGURED','silver':'NOT_DEPLOYED_RUN_AS_NOT_VERIFIED'}));return None
@@ -321,31 +328,34 @@ class Launcher:
         nodes=self.api('get','/api/2.0/clusters/list-node-types')
         require(isinstance(nodes,dict) and isinstance(nodes.get('node_types'),list) and all(isinstance(n,dict) and isinstance(n.get('node_type_id'),str) for n in nodes['node_types']),'INVALID_NODE_TYPES_RESPONSE')
         require(any(n['node_type_id']==uc['node_type_id'] for n in nodes['node_types']),'NODE_TYPE_UNAVAILABLE')
-        # All calls are read-only. Catalog availability is not live capacity.
-        self.preflight_step='bundle_schema'
-        schema=command(['databricks','bundle','schema'],env=self.ws_env,json_output=True,timeout=90)
-        self.preflight_step='scoped_skus'
-        def read_page(argv,stage,timeout):
-            try:return command(argv,env=self.ws_env if argv[0]=='databricks' else self.env,json_output=True,timeout=timeout)
-            except Blocked as exc:
-                code=str(exc)
-                if code!='READ_TIMEOUT':
-                    try:code=json.loads(code).get('code')
-                    except (ValueError,AttributeError):code=None
-                if code in ('READ_TIMEOUT','CONNECTIVITY_FAILED','DNS_FAILED'):
-                    raise Blocked(code+'_AT_'+stage) from None
-                raise
-        skus=read_scoped_skus(read_page,nodes,progress=lambda event:print(json.dumps(event),file=sys.stderr,flush=True))
-        self.preflight_step='azure_quotas'
-        usages=command(['az','vm','list-usage','--location','eastus','--subscription',SUBSCRIPTION,'--output','json'],env=self.env,json_output=True,timeout=120)
-        require(isinstance(usages,list),'INVALID_AZURE_QUOTAS_RESPONSE')
-        self.preflight_step='compute_policy'
-        policy=self.api('get','/api/2.0/policies/clusters/get?policy_id='+urllib.parse.quote(uc['policy_id'],safe=''))
-        self.preflight_step='select_alternates'
-        uc['driver_alternate_node_type_ids']=select_alternates(uc['node_type_id'],nodes,skus,policy,schema,usages,reporter=lambda report:print(json.dumps(report,sort_keys=True)))
-        print(json.dumps({'status':'SILVER_COMPUTE_PREFLIGHT','primary':uc['node_type_id'],
-            'driver_alternates':uc['driver_alternate_node_type_ids'],'region':'eastus',
-            'live_capacity':'NOT_GUARANTEED','quota':'REGIONAL_AND_FAMILY_SNAPSHOT_CHECKED'}))
+        if not getattr(self,'deploy_only',False):
+            # All calls are read-only. Catalog availability is not live capacity.
+            self.preflight_step='bundle_schema'
+            schema=command(['databricks','bundle','schema'],env=self.ws_env,json_output=True,timeout=90)
+            self.preflight_step='scoped_skus'
+            def read_page(argv,stage,timeout):
+                try:return command(argv,env=self.ws_env if argv[0]=='databricks' else self.env,json_output=True,timeout=timeout)
+                except Blocked as exc:
+                    code=str(exc)
+                    if code!='READ_TIMEOUT':
+                        try:code=json.loads(code).get('code')
+                        except (ValueError,AttributeError):code=None
+                    if code in ('READ_TIMEOUT','CONNECTIVITY_FAILED','DNS_FAILED'):
+                        raise Blocked(code+'_AT_'+stage) from None
+                    raise
+            skus=read_scoped_skus(read_page,nodes,progress=lambda event:print(json.dumps(event),file=sys.stderr,flush=True))
+            self.preflight_step='azure_quotas'
+            usages=command(['az','vm','list-usage','--location','eastus','--subscription',SUBSCRIPTION,'--output','json'],env=self.env,json_output=True,timeout=120)
+            require(isinstance(usages,list),'INVALID_AZURE_QUOTAS_RESPONSE')
+            self.preflight_step='compute_policy'
+            policy=self.api('get','/api/2.0/policies/clusters/get?policy_id='+urllib.parse.quote(uc['policy_id'],safe=''))
+            self.preflight_step='select_alternates'
+            uc['driver_alternate_node_type_ids']=select_alternates(uc['node_type_id'],nodes,skus,policy,schema,usages,reporter=lambda report:print(json.dumps(report,sort_keys=True)))
+            print(json.dumps({'status':'SILVER_COMPUTE_PREFLIGHT','primary':uc['node_type_id'],
+                'driver_alternates':uc['driver_alternate_node_type_ids'],'region':'eastus',
+                'live_capacity':'NOT_GUARANTEED','quota':'REGIONAL_AND_FAMILY_SNAPSHOT_CHECKED'}))
+        else:
+            print(json.dumps({'status':'ARTIFACT_PUBLICATION_ONLY','capacity':'NOT_VERIFIED','execution':'BLOCKED'}))
         self.preflight_step='input_volume_permissions'
         for volume in ('bronze','receipts'):
             name=uc['catalog']+'.inputs.'+volume
@@ -362,6 +372,31 @@ class Launcher:
         # Keep .databricks deployment identity across reruns; sync code only.
         shutil.copytree(source,stage,dirs_exist_ok=True,ignore=shutil.ignore_patterns('.databricks','build','dist','*.egg-info','__pycache__'))
         spec=ephemeral_bundle(yaml.safe_load((source/'databricks.yml').read_text()),uc,workspace['workspace_host'])
+        if getattr(self,'deploy_only',False):
+            require(self.c.get('uc_mode')=='workspace','ARTIFACT_PUBLICATION_REQUIRES_WORKSPACE_MODE')
+            record=self.work/'job-id.json'
+            require(record.is_file(),'EXISTING_JOB_RECORD_REQUIRED_FOR_ARTIFACT_PUBLICATION')
+            owned=json.loads(record.read_text(encoding='utf-8'))
+            require(owned['host']==workspace['workspace_host'],'DEPLOYMENT_WORKSPACE_CHANGED')
+            settings=self.api('get','/api/2.1/jobs/get?job_id='+str(owned['job_id']))['settings']
+            require(not any(settings.get(k) for k in ('schedule','continuous','trigger')),'EXISTING_JOB_TRIGGER_REQUIRES_REVIEW')
+            clusters=settings.get('job_clusters',[])
+            require(isinstance(clusters,list) and len(clusters)==1 and clusters[0]['job_cluster_key']=='silver_ephemeral','EXISTING_COMPUTE_CONTRACT_MISMATCH')
+            cluster=clusters[0]['new_cluster']
+            require(cluster.get('policy_id')==uc['policy_id'] and cluster.get('spark_version')=='15.4.x-scala2.12' and
+                cluster.get('node_type_id')==uc['node_type_id'] and cluster.get('num_workers')==0 and
+                cluster.get('data_security_mode')=='SINGLE_USER' and cluster.get('single_user_name')==uc['runner_application_id'] and
+                cluster.get('azure_attributes',{}).get('availability')=='ON_DEMAND_AZURE' and
+                settings.get('run_as',{}).get('service_principal_name')==uc['runner_application_id'],'EXISTING_COMPUTE_CONSTRAINTS_CHANGED')
+            require(uc['node_type_id'] in ('Standard_D4ds_v5','Standard_D4as_v5') and
+                cluster.get('driver_node_type_id',uc['node_type_id'])==uc['node_type_id'] and
+                not cluster.get('autoscale') and not cluster.get('instance_pool_id') and not cluster.get('driver_instance_pool_id'),'EXISTING_COMPUTE_COST_CONSTRAINTS_CHANGED')
+            flexibility=cluster.get('driver_node_type_flexibility') or {}
+            require(isinstance(flexibility,dict),'EXISTING_FLEXIBILITY_CONTRACT_MISMATCH')
+            alternates=flexibility.get('alternate_node_type_ids',[])
+            require(isinstance(alternates,list) and all(isinstance(a,str) for a in alternates) and len(alternates)==len(set(alternates)) and
+                all(a in ALTERNATES[uc['node_type_id']] for a in alternates),'EXISTING_FLEXIBILITY_CONTRACT_MISMATCH')
+            spec['resources']['jobs']['silver']['job_clusters']=clusters
         parent=self.c.get('parent_run_id',PARENT);uuid(parent)
         uri=uc['receipt_volume']+'/'+parent+'.json'
         spec['variables']['catalog']['default']=uc['catalog'];spec['variables']['schema']['default']=uc['schema']
@@ -371,30 +406,34 @@ class Launcher:
         require(epoch.isdigit(),'REPRODUCIBLE_BUILD_EPOCH_REQUIRED')
         wheel=build_wheel(source,stage,epoch,self.env,command)
         pin_wheel(spec,stage,wheel)
+        spec['resources']['jobs']['silver']['tasks'][0]['notebook_task']['base_parameters']['expected_package_version']=wheel_version(wheel)
         (stage/'databricks.yml').write_text(yaml.safe_dump(spec,sort_keys=False),encoding='utf-8')
         validated=command(['databricks','bundle','validate','--output','json'],cwd=stage,env=self.ws_env,json_output=True)
         fingerprint=deployment_sha(stage,expected_wheel=wheel)
-        print('Job efímero: DBR 15.4, 1 nodo, timeout 2h, sin schedule; escribe solo Silver. Revise '+str(stage/'databricks.yml'))
-        approval('DEPLOY-RUN-SILVER',fingerprint)
-        receipt=self.work/(parent+'.json')
-        if receipt.exists():receipt.unlink() # Re-export authoritative evidence; never fabricate/reuse edited JSON.
-        command([sys.executable,str(source/'tools/export_committed_parent.py'),'--parent-run-id',parent,
-            '--output',str(receipt),'--sql-server',self.c.get('sql_server','127.0.0.1,1433'),
-            '--sql-user',self.c.get('sql_user','bronze_reconciler'),'--trust-local-sql-certificate'],env=self.env,interactive=True)
-        # Validate exactly the same evidence contract used by the Job before upload.
-        sys.path.insert(0,str(source/'src'))
-        from admm_silver.contracts import validate_bundle
-        evidence=json.loads(receipt.read_text());validate_bundle(evidence,'stadmmdevdlf6d99ba4')
-        require(evidence['parent_run_id']==parent,'EXPORTED_PARENT_MISMATCH')
-        # Never overwrite a committed evidence artifact. Exact retries reuse it.
-        listing=command(['databricks','fs','ls','dbfs:'+uc['receipt_volume'],'--output','json'],env=self.ws_env,json_output=True)
-        names=listing if isinstance(listing,list) else listing.get('files',[])
-        if any(str(item.get('path',item.get('name',''))).rstrip('/').split('/')[-1]==receipt.name for item in names):
-            existing=self.work/'uploaded-receipt.json'
-            if existing.exists():existing.unlink()
-            command(['databricks','fs','cp','dbfs:'+uri,str(existing)],env=self.ws_env)
-            require(sha(existing)==sha(receipt),'EXISTING_RECEIPT_DIFFERS_NO_OVERWRITE')
-        else:command(['databricks','fs','cp',str(receipt),'dbfs:'+uri],env=self.ws_env)
+        approved_wheel_sha=sha(wheel)
+        approved_cells=notebook_signature((stage/'notebooks/run_silver.py').read_text(encoding='utf-8'))
+        print(('Publicación de artefactos SIN ejecución; capacidad no verificada. Revise ' if getattr(self,'deploy_only',False) else 'Job efímero: DBR 15.4, 1 nodo, timeout 2h, sin schedule; escribe solo Silver. Revise ')+str(stage/'databricks.yml'))
+        approval('DEPLOY-ARTIFACTS-SILVER' if getattr(self,'deploy_only',False) else 'DEPLOY-RUN-SILVER',fingerprint)
+        if not getattr(self,'deploy_only',False):
+            receipt=self.work/(parent+'.json')
+            if receipt.exists():receipt.unlink() # Re-export authoritative evidence; never fabricate/reuse edited JSON.
+            command([sys.executable,str(source/'tools/export_committed_parent.py'),'--parent-run-id',parent,
+                '--output',str(receipt),'--sql-server',self.c.get('sql_server','127.0.0.1,1433'),
+                '--sql-user',self.c.get('sql_user','bronze_reconciler'),'--trust-local-sql-certificate'],env=self.env,interactive=True)
+            # Validate exactly the same evidence contract used by the Job before upload.
+            sys.path.insert(0,str(source/'src'))
+            from admm_silver.contracts import validate_bundle
+            evidence=json.loads(receipt.read_text());validate_bundle(evidence,'stadmmdevdlf6d99ba4')
+            require(evidence['parent_run_id']==parent,'EXPORTED_PARENT_MISMATCH')
+            # Never overwrite a committed evidence artifact. Exact retries reuse it.
+            listing=command(['databricks','fs','ls','dbfs:'+uc['receipt_volume'],'--output','json'],env=self.ws_env,json_output=True)
+            names=listing if isinstance(listing,list) else listing.get('files',[])
+            if any(str(item.get('path',item.get('name',''))).rstrip('/').split('/')[-1]==receipt.name for item in names):
+                existing=self.work/'uploaded-receipt.json'
+                if existing.exists():existing.unlink()
+                command(['databricks','fs','cp','dbfs:'+uri,str(existing)],env=self.ws_env)
+                require(sha(existing)==sha(receipt),'EXISTING_RECEIPT_DIFFERS_NO_OVERWRITE')
+            else:command(['databricks','fs','cp',str(receipt),'dbfs:'+uri],env=self.ws_env)
         require(deployment_sha(stage,expected_wheel=wheel)==fingerprint,'BUNDLE_CHANGED_AFTER_APPROVAL')
         # Never create a second Job for the same namespace/name. A cleared
         # local deployment record requires explicit state recovery, not adoption.
@@ -416,9 +455,14 @@ class Launcher:
             require(not active.get('runs',[]),'ACTIVE_SILVER_RUN_USE_STOP_OR_WAIT')
         if self.c.get('uc_mode')=='workspace':
             self.verify_workspace_run_as(workspace,uc['metastore_id'],uc['operator'],uc['runner_application_id'])
+        if getattr(self,'deploy_only',False):
+            previous=command(['databricks','bundle','summary','--output','json'],cwd=stage,env=self.ws_env,json_output=True)
+            require(str(previous['resources']['jobs']['silver'].get('id'))==str(owned['job_id']),'EXISTING_BUNDLE_JOB_ID_MISMATCH')
+        require(deployment_sha(stage,expected_wheel=wheel)==fingerprint,'BUNDLE_CHANGED_AFTER_APPROVAL')
         command(['databricks','bundle','deploy'],cwd=stage,env=self.ws_env)
         resources=command(['databricks','bundle','summary','--output','json'],cwd=stage,env=self.ws_env,json_output=True)
         job_id=resources['resources']['jobs']['silver']['id']
+        if getattr(self,'deploy_only',False):require(str(job_id)==str(owned['job_id']),'PUBLISHED_JOB_ID_MISMATCH')
         job_record.write_text(json.dumps({'job_id':job_id,'host':workspace['workspace_host']}))
         # Grant only code/artifact subtrees; deployment state remains operator-only.
         bundle_root=validated['workspace']['root_path'].removeprefix('/Workspace')
@@ -427,7 +471,11 @@ class Launcher:
             folder=command(['databricks','workspace','get-status',bundle_root+'/'+subtree,'--output','json'],env=self.ws_env,json_output=True)
             require(folder['object_type']=='DIRECTORY','BUNDLE_ARTIFACT_ROOT_NOT_DIRECTORY')
             command(['databricks','permissions','update','directories',str(folder['object_id']),'--json',acl],env=self.ws_env)
-        verify_deployed_task(command,self.ws_env,job_id,validated['workspace']['root_path'],uc['runner_application_id'])
+        verify_deployed_task(command,self.ws_env,job_id,validated['workspace']['root_path'],uc['runner_application_id'],expected_wheel=wheel,expected_notebook=stage/'notebooks/run_silver.py',expected_settings=validated['resources']['jobs']['silver'],expected_wheel_sha=approved_wheel_sha,expected_cells=approved_cells)
+        if getattr(self,'deploy_only',False):
+            report={'status':'ARTIFACTS_VERIFIED','job_id':job_id,'wheel_name':wheel.name,'wheel_sha256':approved_wheel_sha,'notebook_verification':'PYTHON_CELLS_MATCH','bundle_sha256':fingerprint,'execution':'NOT_STARTED','capacity':'NOT_VERIFIED'}
+            (self.work/'release.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
+            print(json.dumps(report));return
         submitted=command(['databricks','jobs','run-now',str(job_id),'--no-wait','--output','json'],env=self.ws_env,json_output=True)
         run_id=submitted['run_id'];(self.work/'last-run.json').write_text(json.dumps({'run_id':run_id,'job_id':job_id,'host':workspace['workspace_host'],'workspace_resource_id':workspace['workspace_resource_id'],'workspace_profile':(self.c.get('workspace_profile') or 'admm-workspace') if self.c.get('uc_mode')=='workspace' else None}))
         deadline=time.monotonic()+7500
@@ -437,6 +485,14 @@ class Launcher:
             if state['life_cycle_state'] in ('TERMINATED','SKIPPED','INTERNAL_ERROR'):break
             require(time.monotonic()<deadline,'JOB_WAIT_TIMEOUT_USE_STOP')
             print('Silver: '+state['life_cycle_state']);time.sleep(15)
+        if state.get('result_state')!='SUCCESS':
+            failed_tasks=[t for t in run.get('tasks',[]) if t.get('task_key')=='transform_and_verify' and t.get('run_id')]
+            if len(failed_tasks)==1:
+                try:
+                    diagnostic=safe_task_failure(self.api('get','/api/2.1/jobs/runs/get-output?run_id='+str(failed_tasks[0]['run_id'])))
+                    (self.work/'last-failure.json').write_text(json.dumps(diagnostic),encoding='utf-8')
+                    print(json.dumps(diagnostic))
+                except Exception as exc:print(json.dumps({'status':'TASK_DIAGNOSTIC_READ_FAILED','error_type':type(exc).__name__})) # Preserve the primary failed-run result.
         check_run_result(state)
         task=next(t for t in run['tasks'] if t['task_key']=='transform_and_verify')
         output=self.api('get','/api/2.1/jobs/runs/get-output?run_id='+str(task['run_id']))
@@ -488,9 +544,11 @@ def main():
     parser.add_argument('--metastore-id',help='Explicit existing assigned metastore UUID')
     parser.add_argument('--runner-application-id',help='Existing workspace service principal UUID; no identities are created')
     parser.add_argument('--deploy',action='store_true',help='Request saved-plan and deployment approvals interactively')
+    parser.add_argument('--deploy-only',action='store_true',help='Publish/verify current artifacts using existing UC state and compute; never apply Terraform, export SQL, or run a Job')
     parser.add_argument('--stop',action='store_true',help='Cancel only the last recorded Silver run')
     args=parser.parse_args()
     try:
+        require(not args.deploy_only or (args.deploy and args.stage=='silver' and args.uc_mode=='workspace' and not args.stop and not args.diagnose),'DEPLOY_ONLY_REQUIRES_SILVER_WORKSPACE_DEPLOY')
         require(not (args.diagnose and (args.deploy or args.stop)),'DIAGNOSE_IS_READ_ONLY')
         require(not args.correlation_id or args.graph,'CORRELATION_REQUIRES_GRAPH')
         require(not args.graph or args.diagnose,'GRAPH_REQUIRES_DIAGNOSE')
@@ -510,6 +568,7 @@ def main():
             'uc_mode':args.uc_mode,'workspace_profile':args.workspace_profile,'metastore_id':args.metastore_id,
             'runner_application_id':args.runner_application_id})
         launch=Launcher(config,args.deploy,stage=args.stage)
+        launch.deploy_only=args.deploy_only
         deployed=launch.provision()
         if deployed and args.deploy and args.stage in ('all','silver'):launch.deploy_job(*deployed)
         return 0

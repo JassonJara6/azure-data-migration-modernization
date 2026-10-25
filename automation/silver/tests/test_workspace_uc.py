@@ -319,3 +319,22 @@ def test_workspace_silver_rechecks_run_as_after_approval_callback(tmp_path):
         pytest.fail('Revocation must block before apply')
     obj.plan=plan
     with pytest.raises(Blocked,match='USER_GRANT_NOT_PROVEN'):obj.provision()
+
+
+def test_artifact_publication_reads_existing_uc_without_plan_apply(tmp_path):
+    obj,calls=workspace_launcher(tmp_path,deploy=True,stage='silver',runner=APP)
+    obj.deploy_only=True;obj.c['account_id']=ACCOUNT
+    original=obj.outputs
+    obj.outputs=lambda root:original(root) if root==launch.PLATFORM else {'deployment':{'value':dict(runner_application_id=APP,metastore_id=META,node_type_id='Standard_D4ds_v5',catalog='admm_dev',operator=OP)}}
+    obj.plan=lambda *a,**k:pytest.fail('No Terraform plan/apply for artifact-only mode')
+    obj.check_workspace=lambda *a:None
+    assert obj.provision()[0]==WS
+    assert not any(isinstance(c,tuple) and c[0]=='plan' for c in calls)
+
+
+def test_artifact_publication_config_drift_blocks(tmp_path):
+    obj,calls=workspace_launcher(tmp_path,deploy=True,stage='silver',runner=APP)
+    obj.deploy_only=True;obj.c['account_id']=ACCOUNT
+    original=obj.outputs
+    obj.outputs=lambda root:original(root) if root==launch.PLATFORM else {'deployment':{'value':dict(runner_application_id=APP,metastore_id=META,node_type_id='different',catalog='admm_dev',operator=OP)}}
+    with pytest.raises(Blocked,match='EXISTING_UC_OUTPUT_CONFIG_MISMATCH'):obj.provision()

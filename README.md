@@ -66,3 +66,5 @@ Empty phase directories contain `.gitkeep` files solely to make the planned boun
 - [ ] Gold and later delivery phases remain outside this change.
 
 The repository retains historical phase numbers in source/metadata/ADF and Terraform runbooks. Current Silver documentation governs this increment and does not rename or reset earlier work. Existing infrastructure definitions remain documented in the [bootstrap](terraform/bootstrap/README.md) and [dev Terraform root](terraform/environments/dev/README.md).
+
+Silver release/verification: [publish current artifacts without starting compute](automation/silver/SILVER-RELEASE.md).

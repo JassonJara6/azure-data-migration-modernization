@@ -53,6 +53,7 @@ resources:
               account: ${var.account}
               parent_run_id: '{{job.parameters.parent_run_id}}'
               receipt_file: '{{job.parameters.receipt_file}}'
+              expected_package_version: '0.1.0' # Launcher replaces with the content-versioned build.
               replay_check: 'true'
               execution_id: '{{job.run_id}}'
           libraries:

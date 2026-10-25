@@ -66,7 +66,9 @@ def test_notebook_reports_evidence_failure_before_pipeline(monkeypatch,capsys):
     from admm_silver import storage,pipeline
     values=dict(catalog='admm_dev',schema='silver',bronze_volume='/Volumes/admm_dev/inputs/bronze',
         receipt_file='/Volumes/admm_dev/inputs/receipts/synthetic-private.json',account='storage123',
-        parent_run_id=PARENT,execution_id='synthetic-run',replay_check='true')
+        parent_run_id=PARENT,execution_id='synthetic-run',replay_check='true',expected_package_version='0.1.0')
+    import importlib.metadata
+    monkeypatch.setattr(importlib.metadata,'version',lambda name:'0.1.0')
     widgets=NS(text=lambda *a:None,get=lambda key:values[key])
     dbutils=NS(widgets=widgets,notebook=NS(exit=lambda *a:pytest.fail('Must not exit successfully')))
     spark=NS(conf=NS(set=lambda *a:None),sql=lambda *a:NS(collect=lambda:[]))
@@ -100,3 +102,20 @@ def test_volume_receipt_driver_read_is_complete_utf8(monkeypatch):
     monkeypatch.setattr(evidence,'open',volume_open,raising=False)
     assert load_committed_evidence(path,PARENT)==payload
     assert calls==[(path,{'encoding':'utf-8'})]
+
+
+@pytest.mark.parametrize('installed',[None,'0.1.0+e86a2e0b709b','IO_ERROR'])
+def test_notebook_rejects_wrong_installed_distribution_before_ingestion(monkeypatch,capsys,installed):
+    from types import SimpleNamespace as NS
+    from importlib import metadata
+    def version(name):
+        if installed is None:raise metadata.PackageNotFoundError('synthetic-secret')
+        if installed=='IO_ERROR':raise OSError('synthetic-secret')
+        return installed
+    monkeypatch.setattr(metadata,'version',version)
+    dbutils=NS(widgets=NS(text=lambda *a:None,get=lambda key:'0.1.0+expected'))
+    path=Path(__file__).resolve().parents[1]/'notebooks/run_silver.py'
+    with pytest.raises(RuntimeError,match='^SILVER_PACKAGE_'):
+        exec(compile(path.read_text(),str(path),'exec'),{'dbutils':dbutils}) # No Spark: must fail before any ingestion.
+    output=capsys.readouterr().out
+    assert json.loads(output)['stage']=='package_preflight' and 'synthetic-secret' not in output

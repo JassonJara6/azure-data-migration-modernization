@@ -199,20 +199,21 @@ def test_declared_resource_provider_registration_is_explicit():
     with pytest.raises(Blocked):review(plan(address,after={'name':'Microsoft.Other'}),'platform')
 
 
-@pytest.mark.parametrize('workspace_mode',[False,True])
+@pytest.mark.parametrize('workspace_mode,deploy_only,run_failure',[(False,False,None),(True,False,None),(True,True,None),(True,False,'report'),(True,False,'read-error')])
 @pytest.mark.parametrize('locked_cleanup',[False,True])
-def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch,workspace_mode,locked_cleanup):
+def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch,workspace_mode,locked_cleanup,deploy_only,run_failure,capsys):
     """Synthetic control-flow test; does not run SQL, build a real wheel or call Azure."""
     import launch as module
     from types import ModuleType
     parent='10000000-0000-0000-0000-000000000001'
     repo=tmp_path/'repo';source=repo/'databricks/silver';source.mkdir(parents=True)
+    (source/'notebooks').mkdir();(source/'notebooks/run_silver.py').write_text('# Databricks notebook source\nx=1\n')
     (source/'src').mkdir();(source/'src/example.py').write_text('# synthetic source')
     (source/'tools').mkdir();(source/'tools/export_committed_parent.py').write_text('# never executed')
     (source/'pyproject.toml').write_text('[project]\nname="synthetic"\nversion = "0.1.0"\n')
     (source/'databricks.yml').write_text((Path(__file__).parent/'fixtures/pr18-bundle.yml').read_text())
     instance=object.__new__(Launcher);instance.work=repo/'work';instance.work.mkdir()
-    instance.c={'parent_run_id':parent};instance.env={};instance.ws_env={}
+    instance.c={'parent_run_id':parent};instance.env={};instance.ws_env={};instance.deploy_only=deploy_only
     if workspace_mode:instance.c['uc_mode']='workspace'
     uc=dict(catalog='admm_dev',schema='silver',bronze_volume='/Volumes/admm_dev/inputs/bronze',
       receipt_volume='/Volumes/admm_dev/inputs/receipts',metastore_id='synthetic-region',runner_application_id='runner',operator='operator@example.invalid',policy_id='policy',node_type_id='Standard_D4ds_v5')
@@ -222,6 +223,9 @@ def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch,workspac
     if locked_cleanup:
         def windows_denied(*args,**kwargs):raise PermissionError('[WinError 5] Acceso denegado')
         monkeypatch.setattr(module.shutil,'rmtree',windows_denied)
+    if deploy_only:(instance.work/'job-id.json').write_text(json.dumps({'job_id':7,'host':'https://workspace.example.invalid'}))
+    existing_clusters=ephemeral_bundle(yaml.safe_load((source/'databricks.yml').read_text()),uc,'https://workspace.example.invalid')['resources']['jobs']['silver']['job_clusters']
+    existing_clusters[0]['new_cluster']['driver_node_type_flexibility']={'alternate_node_type_ids':['Standard_D4ds_v4']}
     seen=[]
     def cli(args,**kwargs):
         args=list(map(str,args));seen.append(args)
@@ -236,21 +240,40 @@ def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch,workspac
             assert selected.startswith('./dist/wheel-') and '*' not in selected
             assert spec['resources']['jobs']['silver']['tasks'][0]['libraries']==[{'whl':selected}]
             assert (stage/selected).read_bytes()==b'synthetic artifact, not a wheel'
-            return dict(workspace={'root_path':'/Workspace/Shared/admm_dev/admm-silver/dev'},resources={'jobs':{'silver':{'name':'adventureworks-silver-dev'}}})
+            text=json.dumps(spec['resources']['jobs']['silver']).replace('${bundle.target}','dev')
+            for key,value in spec['variables'].items():
+                if 'default' in value:text=text.replace('${var.'+key+'}',str(value['default']))
+            return dict(workspace={'root_path':'/Workspace/Shared/admm_dev/admm-silver/dev'},resources={'jobs':{'silver':json.loads(text)}})
         elif any('export_committed_parent.py' in a for a in args):
             assert kwargs['interactive'] is True
             Path(args[args.index('--output')+1]).write_text(json.dumps({'parent_run_id':parent}))
         elif args[1:3]==['fs','ls']:return []
         elif args[1:3]==['bundle','summary']:return {'resources':{'jobs':{'silver':{'id':'7'}}}}
-        elif args[1:3]==['jobs','get']:return {'settings':{'tasks':[{'task_key':'transform_and_verify','notebook_task':{'notebook_path':'/Workspace/Shared/admm_dev/admm-silver/dev/files/notebooks/run_silver'},'libraries':[{'whl':'/Workspace/Shared/admm_dev/admm-silver/dev/artifacts/code.whl'}]}]}}
+        elif args[1:3]==['jobs','get']:
+            spec=yaml.safe_load((stage/'databricks.yml').read_text())
+            text=json.dumps(spec['resources']['jobs']['silver']).replace('${bundle.target}','dev')
+            for key,value in spec['variables'].items():
+                if 'default' in value:text=text.replace('${var.'+key+'}',str(value['default']))
+            settings=json.loads(text)
+            settings['tasks'][0]['notebook_task']['notebook_path']='/Workspace/Shared/admm_dev/admm-silver/dev/files/notebooks/run_silver'
+            settings['tasks'][0]['libraries']=[{'whl':'/Workspace/Shared/admm_dev/admm-silver/dev/artifacts/synthetic.whl'}]
+            return {'settings':settings}
+        elif args[1:3]==['workspace','export']:
+            dest=Path(args[args.index('--file')+1])
+            if args[args.index('--format')+1]=='RAW':dest.write_bytes(b'synthetic artifact, not a wheel')
+            else:dest.write_text((source/'notebooks/run_silver.py').read_text())
         elif args[1:3]==['permissions','get']:return {'access_control_list':[{'service_principal_name':'runner','all_permissions':[{'permission_level':'CAN_READ','inherited':True}]}]}
         elif args[1:3]==['workspace','get-status']:return {'object_type':'NOTEBOOK' if args[3].endswith('run_silver') else 'FILE' if args[3].endswith('.whl') else 'DIRECTORY','object_id':1}
         elif args[1:3]==['jobs','run-now']:return {'run_id':37}
         return ''
     def api(method,path):
-        if '/jobs/list?' in path:return {'jobs':[]}
-        if '/runs/get?' in path:return {'state':{'life_cycle_state':'TERMINATED','result_state':'SUCCESS'},'tasks':[{'task_key':'transform_and_verify','run_id':38}]}
+        if '/jobs/get?' in path:return {'settings':{'job_clusters':existing_clusters,'run_as':{'service_principal_name':'runner'}}}
+        if 'active_only=true' in path:return {'runs':[]}
+        if '/jobs/list?' in path:return {'jobs':[{'job_id':7,'settings':{'name':'adventureworks-silver-dev'}}] if deploy_only else []}
+        if '/runs/get?' in path:return {'state':{'life_cycle_state':'TERMINATED','result_state':'FAILED' if run_failure else 'SUCCESS'},'tasks':[{'task_key':'transform_and_verify','run_id':38}]}
         if '/get-output?' in path:
+            if run_failure=='read-error':raise ValueError('synthetic-secret')
+            if run_failure=='report':return {'error':'SILVER_RECEIPT_FILE_ACCESS_DENIED '+json.dumps({'stage':'committed_evidence','error_type':'SilverError','location':{'file':'admm_silver/evidence.py','line':8},'message':'synthetic-secret'})}
             r=result();r['parent_run_id']=parent
             return {'notebook_output':{'result':json.dumps(r)}}
         pytest.fail('Unexpected simulated API')
@@ -258,9 +281,25 @@ def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch,workspac
     contract.validate_bundle=lambda data,account:None # real contract belongs to PR18's own tests
     monkeypatch.setitem(sys.modules,'admm_silver',pkg);monkeypatch.setitem(sys.modules,'admm_silver.contracts',contract)
     monkeypatch.setattr(module,'ROOT',repo);monkeypatch.setattr(module,'command',cli)
-    monkeypatch.setattr(module,'approval',lambda *args:None);instance.api=api
+    monkeypatch.setattr(module,'wheel_version',lambda wheel:'0.1.0+000000000000') # This test mocks the wheel builder; real metadata is tested separately.
+    monkeypatch.setattr(module,'approval',lambda *args:seen.append(['approval',args[0]]));instance.api=api
     instance.verify_workspace_run_as=lambda *args:seen.append(['run-as-recheck'])
+    if run_failure:
+        with pytest.raises(Blocked,match='DATABRICKS_JOB_FAILED'):
+            instance.deploy_job({'workspace_host':'https://workspace.example.invalid','workspace_resource_id':'synthetic-arm-id'},uc)
+        assert 'synthetic-secret' not in capsys.readouterr().out
+        assert not (instance.work/'acceptance.json').exists()
+        if run_failure=='report':assert json.loads((instance.work/'last-failure.json').read_text())['error_code']=='RECEIPT_FILE_ACCESS_DENIED'
+        return
     instance.deploy_job({'workspace_host':'https://workspace.example.invalid','workspace_resource_id':'synthetic-arm-id'},uc)
+    if deploy_only:
+        assert ['approval','DEPLOY-ARTIFACTS-SILVER'] in seen
+        release=json.loads((instance.work/'release.json').read_text())
+        assert release['execution']=='NOT_STARTED' and release['capacity']=='NOT_VERIFIED'
+        assert yaml.safe_load((stage/'databricks.yml').read_text())['resources']['jobs']['silver']['job_clusters']==existing_clusters
+        assert not any('run-now' in a or 'export_committed_parent.py' in a or a[1:2]==['fs'] for a in seen)
+        assert not (instance.work/'acceptance.json').exists()
+        return
     accepted=json.loads((instance.work/'acceptance.json').read_text())
     assert (stage/'dist/stale.whl').read_bytes()==b'old wheel must not be used'
     assert (stage/'.databricks/state-marker').read_text()=='keep deployment identity'

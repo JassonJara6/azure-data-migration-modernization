@@ -6,7 +6,31 @@ import re
 import shutil
 import sys
 import tempfile
+import zipfile
+from email.parser import Parser
 from plan_guard import require, sha
+
+
+def source_version(project):
+    inputs=[project/'pyproject.toml',*sorted(p for p in (project/'src').rglob('*')
+        if p.is_file() and not any(part=='__pycache__' or part.endswith('.egg-info') for part in p.parts))]
+    digest=hashlib.sha256(b''.join(p.relative_to(project).as_posix().encode()+b'\0'+p.read_bytes()+b'\0' for p in inputs)).hexdigest()[:12]
+    return '0.1.0+'+digest
+
+
+def wheel_version(wheel):
+    try:
+        with zipfile.ZipFile(wheel) as archive:
+            entries=[name for name in archive.namelist() if name.endswith('.dist-info/METADATA')]
+            require(len(entries)==1,'INVALID_SILVER_WHEEL_METADATA')
+            metadata=Parser().parsestr(archive.read(entries[0]).decode('utf-8'))
+        names=metadata.get_all('Name',[]);versions=metadata.get_all('Version',[])
+        require(len(names)==1 and names[0].lower().replace('_','-')=='admm-silver' and len(versions)==1,'INVALID_SILVER_WHEEL_METADATA')
+        version=versions[0]
+        require(re.fullmatch(r'0\.1\.0\+[0-9a-f]{12}',version) and wheel.name.startswith('admm_silver-'+version+'-'),'INVALID_SILVER_WHEEL_VERSION')
+        return version
+    except (zipfile.BadZipFile,UnicodeError,KeyError,OSError):
+        require(False,'INVALID_SILVER_WHEEL_METADATA')
 
 
 def build_wheel(source, stage, epoch, env, run):
@@ -17,10 +41,7 @@ def build_wheel(source, stage, epoch, env, run):
         project = scratch/'project'; output = scratch/'output'; output.mkdir()
         shutil.copytree(source, project, ignore=shutil.ignore_patterns(
             '.databricks','build','dist','*.egg-info','__pycache__'))
-        inputs = [project/'pyproject.toml', *sorted(p for p in (project/'src').rglob('*')
-                  if p.is_file() and '__pycache__' not in p.parts)]
-        source_hash = hashlib.sha256(b''.join(p.relative_to(project).as_posix().encode()+b'\0'+p.read_bytes()+b'\0'
-                                             for p in inputs)).hexdigest()[:12]
+        source_hash=source_version(project).split('+',1)[1]
         config = project/'pyproject.toml'
         changed, count = re.subn(r'(?m)^version = .*$', f'version = "0.1.0+{source_hash}"', config.read_text())
         require(count == 1, 'EXACTLY_ONE_PROJECT_VERSION_REQUIRED'); config.write_text(changed)

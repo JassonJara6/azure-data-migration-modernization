@@ -20,6 +20,10 @@ def safe_failure(text, default='COMMAND_FAILED'):
         reason = 'SECURITY_DEFAULTS_BLOCK' if 'AADSTS530035' in codes else 'ENTRA_AUTHENTICATION_FAILED'
         return {'code': reason, 'entra_codes': codes}
     for marker, code in (
+        ('MAX_NOTEBOOK_SIZE_EXCEEDED', 'WORKSPACE_EXPORT_SIZE_LIMIT'),
+        ('RESOURCE_DOES_NOT_EXIST', 'WORKSPACE_OBJECT_NOT_FOUND'),
+        ('Exporting a FILE asset', 'WORKSPACE_EXPORT_FORMAT_UNSUPPORTED'),
+        ('PERMISSION_DENIED', 'ACCESS_DENIED'),
         ('AuthorizationFailed', 'ARM_AUTHORIZATION_DENIED'),
         ('AuthenticationFailed', 'AUTHENTICATION_FAILED'),
         ('InvalidAuthenticationTokenTenant', 'ARM_TOKEN_TENANT_MISMATCH'),

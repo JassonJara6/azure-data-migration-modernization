@@ -43,7 +43,8 @@ def test_collector_redacts_receipt_and_task_messages(monkeypatch):
         if argv[1:3]==['jobs','get-run-output']:return {'error':'SILVER_RUNTIME_FAILED synthetic-secret','error_trace':'synthetic-secret'},None
         if argv[:3]==['az','account','show']:return None,{'code':'READ_TIMEOUT'}
         pytest.fail('No writes, cluster or Job execution allowed')
-    result=collector.collect(reader=read)
+    result=collector.collect(reader=read,artifact_verifier=lambda profile: (_ for _ in ()).throw(Blocked('WORKSPACE_EXPORT_SIZE_LIMIT')))
+    assert result['artifacts']=={'status':'NOT_VERIFIED','code':'WORKSPACE_EXPORT_SIZE_LIMIT','error_type':'Blocked'}
     encoded=json.dumps(result)
     assert 'synthetic-secret' not in encoded and result['receipt']=='CONTRACT_INVALID'
     assert result['old_task_code']=='RUNTIME_FAILED'
@@ -89,3 +90,36 @@ def test_malformed_task_metadata_is_not_a_secondary_failure():
     value={'stage':{},'error_type':[],'location':{'file':'synthetic-secret','line':'synthetic-secret'}}
     result=safe_task_failure({'error':'SILVER_RUNTIME_FAILED '+json.dumps(value)})
     assert result['stage'] is None and result['error_type'] is None and result['location'] is None
+
+
+def test_collection_artifact_reader_is_optional_and_passes_profile():
+    import collect_workspace as collector
+    def read(argv):return None,{'code':'ACCESS_DENIED'}
+    calls=[]
+    def verify(profile):
+        calls.append(profile)
+        return {'status':'ARTIFACT_BYTES_VERIFIED','execution':'NOT_STARTED'}
+    report=collector.collect('synthetic-profile',read,verify)
+    assert calls==['synthetic-profile']
+    assert report['artifacts']['execution']=='NOT_STARTED'
+
+
+@pytest.mark.parametrize('message,expected',[
+    ('{"code":"ACCESS_DENIED"}','ACCESS_DENIED'),
+    ('secret:/Users/private','LOCAL_OR_REMOTE_READ_FAILED'),
+    ('LOCAL_STAGING_REQUIRED','LOCAL_STAGING_REQUIRED')])
+def test_collection_artifact_failure_never_leaks_raw_details(message,expected):
+    import collect_workspace as collector
+    def verify(profile):raise Blocked(message)
+    report=collector.collect(reader=lambda argv:(None,{'code':'ACCESS_DENIED'}),artifact_verifier=verify)
+    assert report['artifacts']['status']=='NOT_VERIFIED'
+    assert report['artifacts']['code']==expected
+    assert 'secret' not in json.dumps(report) and '/Users/private' not in json.dumps(report)
+
+
+def test_readonly_artifact_check_requires_original_local_stage(tmp_path,monkeypatch):
+    import collect_workspace as collector
+    monkeypatch.setattr(collector,'ROOT',tmp_path)
+    monkeypatch.setattr(launch,'command',lambda *a,**kw:pytest.fail('No remote calls without original local staging'))
+    with pytest.raises(Blocked,match='LOCAL_STAGING_REQUIRED'):
+        collector.verify_staged_artifacts('admm-workspace')

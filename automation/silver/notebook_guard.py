@@ -54,10 +54,11 @@ def verify_deployed_task(command, env, job_id, root, runner,*,expected_wheel=Non
         directory=tempfile.mkdtemp(prefix='admm-verify-release-')
         try:
             local_wheel=Path(directory)/'remote.whl';local_notebook=Path(directory)/'remote.py'
-            command(['databricks','workspace','export',wheel,'--format','RAW','--file',str(local_wheel)],env=env)
+            # Workspace FILE assets support AUTO, not RAW. CLI --file writes decoded binary bytes.
+            command(['databricks','workspace','export',wheel,'--format','AUTO','--file',str(local_wheel)],env=env,timeout=90)
             require(sha(local_wheel)==(expected_wheel_sha or sha(expected_wheel)),'DEPLOYED_WHEEL_SHA256_MISMATCH')
             notebook_path=notebook['notebook_path']
-            command(['databricks','workspace','export',notebook_path,'--format','SOURCE','--file',str(local_notebook)],env=env)
+            command(['databricks','workspace','export',notebook_path,'--format','SOURCE','--file',str(local_notebook)],env=env,timeout=90)
             remote=local_notebook.read_text(encoding='utf-8')
             # SOURCE may normalize whitespace; preserve executable code AND cell boundaries.
             require(notebook_signature(remote)==(expected_cells if expected_cells is not None else notebook_signature(expected_notebook.read_text(encoding='utf-8'))),'DEPLOYED_NOTEBOOK_CODE_MISMATCH')

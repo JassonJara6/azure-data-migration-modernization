@@ -15,7 +15,28 @@ PARENT='20d65511-8190-41a0-8ad2-23d7568363d2'
 RECEIPT='/Volumes/admm_dev/inputs/receipts/'+PARENT+'.json'
 
 
-def collect(profile='admm-workspace',reader=None):
+def verify_staged_artifacts(profile):
+    # Use the exact previously selected build; never rebuild/adopt remote bytes.
+    import os
+    import yaml
+    from launch import command
+    from notebook_guard import verify_deployed_task,notebook_signature
+    from wheel_artifact import selected_wheel,wheel_version
+    from plan_guard import sha,require
+    stage=ROOT/'work/silver-deployment/bundle'
+    require((stage/'databricks.yml').is_file(),'LOCAL_STAGING_REQUIRED')
+    spec=yaml.safe_load((stage/'databricks.yml').read_text(encoding='utf-8'))
+    wheel=selected_wheel(stage,spec);notebook=stage/'notebooks/run_silver.py'
+    version=spec['resources']['jobs']['silver']['tasks'][0]['notebook_task']['base_parameters']['expected_package_version']
+    require(version==wheel_version(wheel),'STAGED_PACKAGE_VERSION_MISMATCH')
+    digest=sha(wheel);cells=notebook_signature(notebook.read_text(encoding='utf-8'))
+    verify_deployed_task(command,dict(os.environ,DATABRICKS_CONFIG_PROFILE=profile),210884055971910,
+        '/Workspace/Shared/admm_dev/admm-silver/dev','7d5adada-f25c-47f2-ab76-9880b52d5490',
+        expected_wheel=wheel,expected_notebook=notebook,expected_wheel_sha=digest,expected_cells=cells)
+    return {'status':'ARTIFACT_BYTES_VERIFIED','wheel':wheel.name,'sha256':digest,'execution':'NOT_STARTED'}
+
+
+def collect(profile='admm-workspace',reader=None,artifact_verifier=None):
     cache={}
     def read(argv):
         key=tuple(argv)
@@ -74,13 +95,23 @@ def collect(profile='admm-workspace',reader=None):
         if not isinstance(text,str):text=''
         match=re.search(r'SILVER_(RECEIPT_FILE_NOT_FOUND|RECEIPT_FILE_ACCESS_DENIED|RECEIPT_INVALID_UTF8|RECEIPT_FILE_IO_FAILED|RUNTIME_FAILED)\b',text)
         if match:report['old_task_code']=match[1]
+    if artifact_verifier is not None:
+        try:report['artifacts']=artifact_verifier(profile)
+        except Exception as exc:
+            code='LOCAL_OR_REMOTE_READ_FAILED'
+            if isinstance(exc,Blocked):
+                candidate=str(exc)
+                try:candidate=json.loads(candidate).get('code','')
+                except (ValueError,AttributeError):pass
+                if isinstance(candidate,str) and re.fullmatch(r'[A-Z][A-Z0-9_]{0,100}',candidate):code=candidate
+            report['artifacts']={'status':'NOT_VERIFIED','code':code,'error_type':type(exc).__name__}
     return report
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--profile',default='admm-workspace')
     args=parser.parse_args()
-    try:print(json.dumps(collect(args.profile),sort_keys=True));return 0
+    try:print(json.dumps(collect(args.profile,artifact_verifier=verify_staged_artifacts),sort_keys=True));return 0
     except Exception as exc:
         print(json.dumps({'status':'COLLECTION_FAILED','error_type':type(exc).__name__}));return 1
 

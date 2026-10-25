@@ -259,8 +259,9 @@ def test_job_orchestration_with_simulated_cli_only(tmp_path,monkeypatch,workspac
             settings['tasks'][0]['libraries']=[{'whl':'/Workspace/Shared/admm_dev/admm-silver/dev/artifacts/synthetic.whl'}]
             return {'settings':settings}
         elif args[1:3]==['workspace','export']:
+            assert args[args.index('--format')+1] in ('AUTO','SOURCE')
             dest=Path(args[args.index('--file')+1])
-            if args[args.index('--format')+1]=='RAW':dest.write_bytes(b'synthetic artifact, not a wheel')
+            if args[args.index('--format')+1]=='AUTO':dest.write_bytes(b'synthetic artifact, not a wheel')
             else:dest.write_text((source/'notebooks/run_silver.py').read_text())
         elif args[1:3]==['permissions','get']:return {'access_control_list':[{'service_principal_name':'runner','all_permissions':[{'permission_level':'CAN_READ','inherited':True}]}]}
         elif args[1:3]==['workspace','get-status']:return {'object_type':'NOTEBOOK' if args[3].endswith('run_silver') else 'FILE' if args[3].endswith('.whl') else 'DIRECTORY','object_id':1}

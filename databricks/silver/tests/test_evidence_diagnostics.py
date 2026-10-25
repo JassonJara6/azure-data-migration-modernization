@@ -83,3 +83,18 @@ def test_notebook_reports_evidence_failure_before_pipeline(monkeypatch,capsys):
     assert report['stage']=='committed_evidence' and report['error_type']=='PermissionError'
     assert report['location']['file']=='admm_silver/evidence.py'
     assert 'synthetic-' not in output and 'credentials' not in output
+
+
+def test_volume_receipt_driver_read_is_complete_utf8(monkeypatch):
+    # No DBUtils/head fallback: receipt may exceed the usual head preview size.
+    import io
+    import admm_silver.evidence as evidence
+    path='/Volumes/admm_dev/inputs/receipts/'+PARENT+'.json'
+    payload={'parent_run_id':PARENT,'padding':'á'*70000}
+    calls=[]
+    def volume_open(actual,**kwargs):
+        calls.append((actual,kwargs))
+        return io.StringIO(json.dumps(payload,ensure_ascii=False))
+    monkeypatch.setattr(evidence,'open',volume_open,raising=False)
+    assert load_committed_evidence(path,PARENT)==payload
+    assert calls==[(path,{'encoding':'utf-8'})]

@@ -141,3 +141,7 @@ verificaciones de catálogo del workspace, restricciones East US, cuotas y polí
 existente. Véase [procedimiento y límites de capacidad](COMPUTE-CAPACITY.md).
 CLI 0.275.0 ya no basta para esta ruta; se requiere 0.285.0+. Las comprobaciones
 no garantizan disponibilidad física y no se realizan reintentos automáticos del Job.
+
+Para investigar el bloqueo de capacidad **sin desplegar ni ejecutar compute**, use
+el [procedimiento único de solo lectura del issue #30](ISSUE-30.md). El informe
+comparte la selección real del launcher y explica cada candidato y cuota.

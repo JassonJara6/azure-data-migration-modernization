@@ -108,3 +108,28 @@ winpty python automation/silver/launch.py --stage silver --uc-mode workspace --w
 No es necesario borrar ni renombrar `dist` antes de repetirlo. Se mantienen los controles Terraform, la delegación RUN AS, la exportación protegida del recibo real y la aprobación separada `DEPLOY-RUN-SILVER`. Sin `--deploy` solo se planifica; no se construye ni ejecuta Silver. La validación local usa mocks de Windows/Job y builds reales de wheel sin recursos Azure; no representa un despliegue real ni certifica la ejecución de las once fuentes.
 
 Validación de esta corrección: **147 pruebas locales aprobadas**, incluyendo WinError 5 simulado, selección frente a wheels obsoletos, fallos de build, verificación SHA con Python `-O` y dos compilaciones reales reproducibles. Bundle generado contrastado con JSON Schema oficial de Databricks CLI 0.275.0. `compileall` y `git diff --check` aprobados; sin prueba de despliegue real en Windows/Databricks.
+
+### Notebook synchronization and RUN AS preflight
+
+The launcher stages the bundle under Git-ignored `work/`. DAB honors Git ignore
+rules for normal synchronization even though bundle validation resolves a local
+notebook path into a remote Job path. The source bundle and staging overlay now
+explicitly include `notebooks/run_silver.py` in `sync.include` (DAB includes are
+added independently of Git ignore rules). Keep the task path relative:
+`./notebooks/run_silver.py`, source `WORKSPACE`. DAB uploads the source notebook,
+recognizes its `# Databricks notebook source` header, and resolves the Job path to
+`${workspace.file_path}/notebooks/run_silver` without the `.py` extension. Do not
+hardcode a remote notebook path or manually import the notebook.
+
+After an approved deployment, before `run-now`, the launcher reads the actual
+Job settings, checks the resolved notebook and wheel paths under this bundle,
+and verifies their Workspace object types and effective runner ACLs. Missing
+objects, unexpected paths or absent read permission block execution. The runner
+receives only `CAN_READ` on the `files` and `artifacts` directories, inherited by
+the notebook/wheel; deployment state is not granted. Existing inherited grants
+are not removed. UC data permissions and RUN AS delegation checks remain intact.
+
+These are local regression checks, not evidence of an actual Databricks upload
+or successful Silver execution. Merge the fix and repeat the existing launcher
+procedure with its hash approvals; a real deployment/Job still requires operator
+authorization. No manual notebook upload or new infrastructure is needed.

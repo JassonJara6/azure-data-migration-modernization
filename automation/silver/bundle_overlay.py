@@ -11,6 +11,9 @@ def ephemeral_bundle(original,uc,host):
     task=job['tasks'][0]
     require('existing_cluster_id' in task,'SILVER_COMPUTE_CONTRACT_CHANGED')
     task.pop('existing_cluster_id');value['variables'].pop('existing_cluster_id')
+    # DAB include overrides the enclosing repository work/ gitignore rule.
+    value['sync']={'include':['notebooks/run_silver.py']}
+    task['notebook_task']['source']='WORKSPACE'
     task['job_cluster_key']='silver_ephemeral'
     for trigger in ('schedule','continuous','trigger'):job.pop(trigger,None)
     task['max_retries']=0

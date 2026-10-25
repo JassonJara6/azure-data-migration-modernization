@@ -17,6 +17,7 @@ import tempfile
 import urllib.parse
 import yaml
 from plan_guard import Blocked,require,review,sha,comparison_sha
+from notebook_guard import verify_deployed_task
 from bundle_overlay import ephemeral_bundle
 from wheel_artifact import build_wheel,pin_wheel,selected_wheel
 from diagnose import diagnose, safe_failure, SUBSCRIPTION, TENANT
@@ -379,12 +380,14 @@ class Launcher:
         resources=command(['databricks','bundle','summary','--output','json'],cwd=stage,env=self.ws_env,json_output=True)
         job_id=resources['resources']['jobs']['silver']['id']
         job_record.write_text(json.dumps({'job_id':job_id,'host':workspace['workspace_host']}))
-        # RUN AS needs read access to its notebook/wheel, not the operator's home.
+        # Grant only code/artifact subtrees; deployment state remains operator-only.
         bundle_root=validated['workspace']['root_path'].removeprefix('/Workspace')
-        folder=command(['databricks','workspace','get-status',bundle_root,'--output','json'],env=self.ws_env,json_output=True)
-        require(folder['object_type']=='DIRECTORY','BUNDLE_ROOT_NOT_DIRECTORY')
         acl=json.dumps({'access_control_list':[{'service_principal_name':uc['runner_application_id'],'permission_level':'CAN_READ'}]})
-        command(['databricks','permissions','update','directories',str(folder['object_id']),'--json',acl],env=self.ws_env)
+        for subtree in ('files','artifacts'):
+            folder=command(['databricks','workspace','get-status',bundle_root+'/'+subtree,'--output','json'],env=self.ws_env,json_output=True)
+            require(folder['object_type']=='DIRECTORY','BUNDLE_ARTIFACT_ROOT_NOT_DIRECTORY')
+            command(['databricks','permissions','update','directories',str(folder['object_id']),'--json',acl],env=self.ws_env)
+        verify_deployed_task(command,self.ws_env,job_id,validated['workspace']['root_path'],uc['runner_application_id'])
         submitted=command(['databricks','jobs','run-now',str(job_id),'--no-wait','--output','json'],env=self.ws_env,json_output=True)
         run_id=submitted['run_id'];(self.work/'last-run.json').write_text(json.dumps({'run_id':run_id,'job_id':job_id,'host':workspace['workspace_host'],'workspace_resource_id':workspace['workspace_resource_id'],'workspace_profile':(self.c.get('workspace_profile') or 'admm-workspace') if self.c.get('uc_mode')=='workspace' else None}))
         deadline=time.monotonic()+7500

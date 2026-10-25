@@ -145,3 +145,7 @@ no garantizan disponibilidad física y no se realizan reintentos automáticos de
 Para investigar el bloqueo de capacidad **sin desplegar ni ejecutar compute**, use
 el [procedimiento único de solo lectura del issue #30](ISSUE-30.md). El informe
 comparte la selección real del launcher y explica cada candidato y cuota.
+
+La corrección del [issue #33](ISSUE-33.md) elimina la dependencia del catálogo
+completo de SKU ARM. Usa evidencia explícita del proveedor de Databricks,
+identidad/región ARM del workspace y cuotas reales; campos ausentes bloquean.

@@ -1,5 +1,9 @@
 # Issue #30: Silver preflight and evidence, without paid runs
 
+**Current strategy:** [Issue #33 scoped provider evidence](ISSUE-33.md) supersedes
+the full ARM catalog/pagination route described below. The older sections remain
+as historical findings, not the current production read path.
+
 ## Findings
 
 The current `NO_ELIGIBLE_SILVER_FALLBACK_CHECK_EASTUS_SKUS_AND_QUOTAS`

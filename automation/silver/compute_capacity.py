@@ -3,6 +3,7 @@ import json
 import re
 from decimal import Decimal, InvalidOperation
 from plan_guard import require,Blocked
+from capacity_reads import ScopedSkuEvidence,APPROVED_SKUS,SOURCE,FAMILIES
 
 # Directional compatibility, not interchangeable just because CPU/RAM match.
 # https://learn.microsoft.com/azure/databricks/compute/flexible-node-type-instances
@@ -24,6 +25,16 @@ def _select_alternates(primary,nodes,skus,policy,schema,usages,report):
     require(supports_driver_flexibility(schema),'FLEXIBLE_NODES_REQUIRE_DATABRICKS_CLI_0_285_OR_NEWER')
     require(primary in ALTERNATES,'UNREVIEWED_SILVER_PRIMARY_NODE_TYPE')
     require(isinstance(nodes,dict) and isinstance(nodes.get('node_types'),list),'INVALID_NODE_TYPES_RESPONSE')
+    scoped=isinstance(skus,ScopedSkuEvidence)
+    if scoped:
+        require(skus.source==SOURCE and skus.region=='eastus' and skus.requested==APPROVED_SKUS,'INVALID_SCOPED_SKU_CONTRACT')
+        skus=list(skus.records)
+        require(len(skus)==len(APPROVED_SKUS) and {s.get('name') for s in skus if isinstance(s,dict)}==set(APPROVED_SKUS),'INCOMPLETE_SCOPED_SKU_EVIDENCE')
+        require(primary in APPROVED_SKUS and all(n in APPROVED_SKUS for n in ALTERNATES[primary]),'UNSUPPORTED_SCOPED_PRIMARY')
+        report['source']=SOURCE;report['scope']=list(APPROVED_SKUS)
+        require(all(isinstance(s,dict) and s.get('family')==FAMILIES[s['name']] for s in skus),'INVALID_SCOPED_QUOTA_FAMILY')
+        primary_record=next(s for s in skus if s['name']==primary)
+        require(primary_record.get('provider_status')==[],'SCOPED_PRIMARY_PROVIDER_STATUS_NOT_CLEAR')
     require(isinstance(skus,list),'INVALID_AZURE_SKUS_RESPONSE')
     require(all(isinstance(s,dict) for s in skus),'INVALID_AZURE_SKU_ITEM')
     require(usages is None or isinstance(usages,list),'INVALID_AZURE_QUOTAS_RESPONSE')
@@ -53,6 +64,9 @@ def _select_alternates(primary,nodes,skus,policy,schema,usages,report):
         used=number(q.get('currentValue'),'INVALID_AZURE_QUOTA_CURRENT_VALUE')
         require(limit==limit.to_integral_value() and used==used.to_integral_value(),'INVALID_AZURE_QUOTA_CORES')
         return {'status':'CHECKED','key':key,'limit':int(limit),'used':int(used),'headroom':int(limit-used)}
+    if scoped:
+        report['primary_quota']={'regional':quota_info('cores'),'family':quota_info(primary_record['family'])}
+        require(all(q['status']=='CHECKED' for q in report['primary_quota'].values()),'SCOPED_PRIMARY_QUOTA_MISSING')
     available=set()
     for entry in report['candidates']:
         node=entry['node_type_id'];reasons=entry['reasons']
@@ -67,7 +81,14 @@ def _select_alternates(primary,nodes,skus,policy,schema,usages,report):
             require(isinstance(capabilities,list) and all(isinstance(c,dict) and isinstance(c.get('name'),str) for c in capabilities),'INVALID_AZURE_SKU_CAPABILITIES')
             require(len({c['name'] for c in capabilities})==len(capabilities),'INVALID_AZURE_SKU_DUPLICATE_CAPABILITY')
             caps={c['name']:c.get('value') for c in capabilities}
-            locations=sku.get('locations');restrictions=sku.get('restrictions')
+            locations=sku.get('locations')
+            if scoped:
+                statuses=sku.get('provider_status')
+                require(isinstance(statuses,list) and all(s in ('NotEnabledOnSubscription','NotAvailableInRegion') for s in statuses),'INVALID_SCOPED_PROVIDER_STATUS')
+                if 'NotEnabledOnSubscription' in statuses:reasons.append('PROVIDER_NOT_ENABLED_ON_SUBSCRIPTION')
+                if 'NotAvailableInRegion' in statuses:reasons.append('PROVIDER_NOT_AVAILABLE_IN_REGION')
+                restrictions=[] # No ARM restriction assertion: provider flags above are the evidence.
+            else:restrictions=sku.get('restrictions')
             require(isinstance(locations,list) and isinstance(restrictions,list) and all(isinstance(r,dict) for r in restrictions),'INVALID_AZURE_SKU_LOCATIONS_OR_RESTRICTIONS')
             if sku.get('resourceType')!='virtualMachines':reasons.append('NOT_VIRTUAL_MACHINE')
             if 'eastus' not in [str(v).lower() for v in locations]:reasons.append('NOT_IN_EASTUS')
@@ -134,6 +155,7 @@ def select_alternates(primary,nodes,skus,policy,schema,usages=None,*,reporter=No
     finally:
         for entry in report['candidates']:
             entry['actions']=sorted({
+                'REVIEW_EXPLICIT_PROVIDER_EVIDENCE_NO_PAID_RETRY' if reason.startswith('PROVIDER_') or 'PROVIDER_STATUS' in reason else
                 'VERIFY_MACHINE_QUOTA_KEYS_AND_READER_ACCESS' if 'MISSING' in reason and 'QUOTA' in reason else
                 'REVIEW_REGIONAL_OR_FAMILY_QUOTA_NO_AUTO_INCREASE' if 'QUOTA_INSUFFICIENT' in reason else
                 'REVIEW_EASTUS_SUBSCRIPTION_RESTRICTIONS' if 'RESTRICT' in reason else

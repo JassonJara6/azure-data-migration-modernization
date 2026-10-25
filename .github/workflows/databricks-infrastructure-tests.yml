@@ -20,6 +20,15 @@ jobs:
         with:
           terraform_version: '1.9.8'
           terraform_wrapper: false
+      - name: Install pinned CLI for strict loopback Workspace API tests
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/admm-cli"
+          curl --fail --silent --show-error --location https://github.com/databricks/cli/releases/download/v1.22.1/databricks_cli_1.22.1_linux_amd64.zip -o "$RUNNER_TEMP/admm-cli.zip"
+          echo "2f24260441f211e75df4266fba506983cd2373c622cb34437d752befba8261af  $RUNNER_TEMP/admm-cli.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/admm-cli.zip" databricks -d "$RUNNER_TEMP/admm-cli"
+          chmod +x "$RUNNER_TEMP/admm-cli/databricks"
+          echo "SILVER_DATABRICKS_BIN=$RUNNER_TEMP/admm-cli/databricks" >> "$GITHUB_ENV"
       - run: python -m pip install -r automation/silver/requirements.txt
       - run: terraform fmt -check -recursive terraform/environments/dev terraform/modules/databricks_workspace terraform/databricks/dev terraform/databricks/workspace
       - name: Validate existing platform without initializing the real backend

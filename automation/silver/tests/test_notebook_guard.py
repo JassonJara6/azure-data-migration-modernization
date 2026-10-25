@@ -41,7 +41,7 @@ def test_source_bundle_explicitly_syncs_notebook():
     assert task['notebook_task']['source']=='WORKSPACE'
     assert (repo/'databricks/silver/notebooks/run_silver.py').read_text().startswith('# Databricks notebook source')
 
-@pytest.mark.parametrize('failure',[None,'old-wheel','changed-bytes','old-notebook','magic'])
+@pytest.mark.parametrize('failure',[None,'old-wheel','changed-bytes','old-notebook','magic','download-denied'])
 def test_exact_release_artifacts_required(tmp_path,failure):
     wheel=tmp_path/'code.whl';wheel.write_bytes(b'fresh bytes')
     source=tmp_path/'run_silver.py';source.write_text('x=1\n')
@@ -52,8 +52,10 @@ def test_exact_release_artifacts_required(tmp_path,failure):
         if argv[1:3]==['workspace','get-status']:return {'object_type':'FILE' if argv[3].endswith('.whl') else 'NOTEBOOK','object_id':7}
         if argv[1:3]==['permissions','get']:return {'access_control_list':[{'service_principal_name':'runner','all_permissions':[{'permission_level':'CAN_READ'}]}]}
         if argv[1:3]==['workspace','export']:
+            if argv[argv.index('--format')+1]=='RAW':raise Blocked('Exporting a FILE asset in RAW format is not supported.')
             dest=Path(argv[argv.index('--file')+1])
-            if argv[argv.index('--format')+1]=='RAW':dest.write_bytes(b'old' if failure=='changed-bytes' else b'fresh bytes')
+            if failure=='download-denied' and argv[argv.index('--format')+1]=='AUTO':raise Blocked('WORKSPACE_READ_DENIED')
+            if argv[argv.index('--format')+1]=='AUTO':dest.write_bytes(b'old' if failure=='changed-bytes' else b'fresh bytes')
             else:dest.write_text('x=2\n' if failure=='old-notebook' else 'x=1\n# MAGIC %sql SELECT 1\n' if failure=='magic' else '# Databricks notebook source\n\nx = 1\n')
             return
         pytest.fail('No run or mutation permitted')
@@ -97,8 +99,36 @@ def test_verification_uses_frozen_approved_inputs(tmp_path,changed):
         if argv[1:3]==['workspace','get-status']:return {'object_type':'FILE' if argv[3].endswith('.whl') else 'NOTEBOOK','object_id':7}
         if argv[1:3]==['permissions','get']:return {'access_control_list':[{'service_principal_name':'runner','all_permissions':[{'permission_level':'CAN_READ'}]}]}
         if argv[1:3]==['workspace','export']:
+            if argv[argv.index('--format')+1]=='RAW':raise Blocked('Exporting a FILE asset in RAW format is not supported.')
             destination=Path(argv[argv.index('--file')+1])
-            destination.write_bytes(wheel.read_bytes() if argv[argv.index('--format')+1]=='RAW' else notebook.read_bytes())
+            destination.write_bytes(wheel.read_bytes() if argv[argv.index('--format')+1]=='AUTO' else notebook.read_bytes())
             return
         pytest.fail('No run')
     with pytest.raises(Blocked):verify_deployed_task(cli,{},1,ROOT,'runner',expected_wheel=wheel,expected_notebook=notebook,expected_wheel_sha=approved_sha,expected_cells=approved_cells)
+
+
+def test_auto_file_export_preserves_binary_sha_and_never_uses_raw(tmp_path):
+    from plan_guard import sha
+    wheel=tmp_path/'code.whl';payload=b'PK\x03\x04\x00\xff\x80\r\n\x00binary-wheel'
+    wheel.write_bytes(payload)
+    notebook=tmp_path/'run_silver.py';notebook.write_text('x=1\n')
+    formats=[]
+    def cli(argv,**kwargs):
+        if argv[1:3]==['jobs','get']:return {'settings':{'tasks':[copy.deepcopy(TASK)]}}
+        if argv[1:3]==['workspace','get-status']:return {'object_type':'FILE' if argv[3].endswith('.whl') else 'NOTEBOOK','object_id':7}
+        if argv[1:3]==['permissions','get']:return {'access_control_list':[{'service_principal_name':'runner','all_permissions':[{'permission_level':'CAN_READ'}]}]}
+        if argv[1:3]==['workspace','export']:
+            format=argv[argv.index('--format')+1];formats.append(format)
+            if format=='RAW':raise Blocked('Exporting a FILE asset in RAW format is not supported.')
+            dest=Path(argv[argv.index('--file')+1])
+            if format=='AUTO':dest.write_bytes(payload)
+            elif format=='SOURCE':dest.write_text('x=1\n')
+            else:pytest.fail('Unexpected export format')
+            return
+        pytest.fail('Read-only artifact verification only')
+    # Reproduce the confirmed service rejection; the corrected guard must avoid it.
+    with pytest.raises(Blocked,match='RAW format is not supported'):
+        cli(['databricks','workspace','export',ROOT+'/artifacts/pkg/code.whl','--format','RAW','--file','unused'])
+    formats.clear()
+    verify_deployed_task(cli,{},210884055971910,ROOT,'runner',expected_wheel=wheel,expected_notebook=notebook,expected_wheel_sha=sha(wheel))
+    assert formats==['AUTO','SOURCE']

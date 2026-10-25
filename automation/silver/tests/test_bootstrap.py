@@ -259,3 +259,12 @@ def test_tf_error_identifies_stage_without_disclosing_output(monkeypatch):
     monkeypatch.setattr(launch, 'command', denied)
     with pytest.raises(Blocked, match='PLATFORM_PLAN: ARM_AUTHORIZATION_DENIED'):
         instance.tf(launch.PLATFORM, 'plan')
+
+
+@pytest.mark.parametrize('marker,code',[
+    ('PERMISSION_DENIED','ACCESS_DENIED'),
+    ('RESOURCE_DOES_NOT_EXIST','WORKSPACE_OBJECT_NOT_FOUND'),
+    ('MAX_NOTEBOOK_SIZE_EXCEEDED','WORKSPACE_EXPORT_SIZE_LIMIT'),
+    ('Exporting a FILE asset private-path in RAW format is not supported','WORKSPACE_EXPORT_FORMAT_UNSUPPORTED')])
+def test_workspace_export_errors_are_static_and_safe(marker,code):
+    assert doctor.safe_failure(marker+' synthetic-secret')=={'code':code}

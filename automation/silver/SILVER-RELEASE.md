@@ -2,7 +2,7 @@
 
 ## Hallazgos confirmados y límites
 
-El operador informó que el Job `210884055971910` sigue referenciando
+Evidencia histórica previa a PR #36: el operador informó que el Job `210884055971910` sigue referenciando
 `admm_silver-0.1.0+e86a2e0b709b-py3-none-any.whl`. El código actual de main con
 PR #35 genera `0.1.0+cb70e1c8cdcb` en este checkout Linux. El identificador se
 calcula sobre los bytes reales del proyecto; otro checkout con finales de línea
@@ -23,7 +23,7 @@ Correcciones:
 
 - Build limpio y reproducible en temp, selección exacta del wheel, SHA-256,
   estado DAB persistente y protección OneDrive se conservan.
-- Tras publicar, se exporta el FILE wheel como RAW y se exige su SHA-256 local.
+- Tras publicar, se exporta el FILE wheel como AUTO y se exige su SHA-256 local.
   Se exporta el notebook como SOURCE y se comparan AST y fronteras de celdas:
   cambios de código, celdas o MAGIC bloquean. La normalización inocua de espacios
   o cabecera del export no fuerza un falso fallo.
@@ -132,11 +132,11 @@ operador («Cerrar Silver primero»); no se declara un pipeline Gold existente.
 
 ## Fuentes del contrato de artefactos
 
-- [Workspace export RAW/SOURCE y workspace files](https://docs.databricks.com/api/workspace-files/v1/export)
+- [Workspace export AUTO/SOURCE y workspace files](https://docs.databricks.com/api/workspace-files/v1/export)
 - [Workspace files incluyen wheels](https://docs.databricks.com/aws/en/files/workspace)
 - [Contrato de capacidad y límites](ISSUE-33.md)
 
-## Evidencia local de esta corrección
+## Evidencia histórica de PR #36 (no resultados del cambio FILE/AUTO)
 
 - Automatización: `SILVER_WHEEL_BUILD_TESTS=1 SILVER_PROVIDER_AUTH_TESTS=1 SILVER_TERRAFORM_BIN=/workspace/work/infrastructure/bin/terraform PYTHONPATH=/workspace/work/silver/deps python -m pytest -q automation/silver/tests --tb=short` — **274 aprobadas**, sin omisiones.
 - Silver: `SILVER_DELTA_JARS=/workspace/work/silver/jars/delta-spark_2.12-3.2.1.jar,/workspace/work/silver/jars/delta-storage-3.2.1.jar PYTHONPATH=/workspace/work/silver/deps:/workspace/work/silver/bronze-deps python -m pytest -q databricks/silver/tests --tb=short` — **50 aprobadas**, sin omisiones, con OSS Spark/Delta local.
@@ -150,3 +150,28 @@ configuración UC divergente, falla de tarea/lectura secundaria y redacción del
 colector. Las compilaciones reales verifican reproducibilidad y correspondencia
 del nombre del wheel con la versión calculada por el colector.
 No son evidencia de instalación/ejecución Databricks real ni de FUSE/stock Azure.
+
+### Verificar la corrección FILE/AUTO sin publicar ni ejecutar el Job
+
+`RAW` fue rechazado por el servicio para assets `FILE`. Se usa `AUTO` en
+`GET /api/2.0/workspace/export`, que incluye Workspace files. El CLI decodifica
+base64 y escribe bytes con `os.WriteFile`; no se convierten a texto. SHA-256,
+entradas aprobadas congeladas y exportación SOURCE del notebook se conservan.
+Véase el [contrato AUTO](https://docs.databricks.com/api/workspace-files/v1/export)
+y la [implementación CLI v1.22.1](https://github.com/databricks/cli/blob/v1.22.1/cmd/workspace/workspace/overrides.go).
+
+Git Bash, después de fusionar el PR, conservando el bundle local que se publicó:
+
+```bash
+git switch main
+git pull --ff-only origin main
+bash automation/silver/collect_workspace.sh --profile admm-workspace
+```
+
+El único colector comprueba metadatos, receipt y artefactos seleccionados locales
+contra los bytes remotos y las celdas del notebook. Solo GET/export/fs cat y
+escrituras temporales locales: nunca publica ni ejecuta. `READ_ONLY_COLLECTION`
+no equivale a aprobación: revisar cada subresultado. Si falta el original local,
+`artifacts.status=NOT_VERIFIED`; no reconstruirlo ni adoptar el remoto para forzar
+igualdad. Permisos denegados, ausencia, tamaño excesivo o SHA distinto bloquean.
+Véase la [matriz y aceptación condicionada](WORKSPACE-FILE-VERIFICATION.md).

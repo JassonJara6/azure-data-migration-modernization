@@ -1,7 +1,9 @@
 # Databricks notebook source
 # One Job invocation performs preflight, publication and a no-write replay check.
 import json
-from admm_silver.contracts import SilverError,require,identifier,strict_json,TABLES
+from admm_silver.contracts import require,identifier,TABLES
+from admm_silver.evidence import load_committed_evidence
+from admm_silver.diagnostics import failure_report
 from admm_silver.storage import verify_volume,DeltaStore
 from admm_silver.pipeline import run
 
@@ -29,8 +31,7 @@ try:
     # Require existing schema with a managed storage location; never create infrastructure.
     spark.sql('DESCRIBE SCHEMA '+namespace).collect()
     stage='committed_evidence'
-    with open(receipt_file,encoding='utf-8') as stream:bundle=strict_json(stream.read())
-    require(bundle['parent_run_id']==parent,'REQUESTED_PARENT_MISMATCH')
+    bundle=load_committed_evidence(receipt_file,parent)
     stage='silver_apply'
     result=run(spark,bundle,account=account,bronze_root=bronze,namespace=namespace,execution_id=dbutils.widgets.get('execution_id'))
     if dbutils.widgets.get('replay_check')=='true':
@@ -42,9 +43,11 @@ try:
     dbutils.jobs.taskValues.set(key='silver_status',value='SUCCEEDED')
 except Exception as exc:
     # Hide raw Spark/cloud messages from notebook output (may contain row data).
-    code=str(exc) if isinstance(exc,SilverError) else 'RUNTIME_FAILED'
-    print(json.dumps({'status':'FAILED','stage':stage,'error_code':code}))
-    raise RuntimeError('SILVER_'+code) from None
+    diagnostic=failure_report(exc,stage)
+    code=diagnostic['error_code']
+    print(json.dumps(diagnostic,sort_keys=True))
+    # Include only this safe metadata in task error output as well as cell output.
+    raise RuntimeError('SILVER_'+code+' '+json.dumps(diagnostic,sort_keys=True)) from None
 
 # Keep exit outside the exception handler: Databricks exit may use a control exception.
 dbutils.notebook.exit(json.dumps(result,sort_keys=True))

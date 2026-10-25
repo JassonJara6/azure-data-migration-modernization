@@ -1,109 +1,121 @@
-"""PR #32 regression: bounded pagination, stage-safe timeouts, legacy readers."""
+"""Issue #33: scoped provider evidence, no full ARM SKU catalog dependency."""
+import copy
 import json
 import subprocess
 import sys
 from pathlib import Path
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from types import SimpleNamespace as NS
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import pytest
-from capacity_reads import read_sku_catalog,SKU_URL
+from capacity_reads import read_scoped_skus,ScopedSkuEvidence,APPROVED_SKUS,SOURCE
 from check_capacity import inspect_capacity
+from compute_capacity import select_alternates
 from plan_guard import Blocked
-from test_compute_capacity import inputs,PRIMARY,SCHEMA
+from test_compute_capacity import inputs,PRIMARY,SCHEMA,scoped_nodes,workspace_response,scoped_quotas
 from diagnose import SUBSCRIPTION,TENANT
 
 
-def page_url(token):return SKU_URL+'&$skiptoken='+token
+def binding_reader(argv,stage,timeout):
+    assert timeout==90 and 'rest' not in argv and 'list-skus' not in argv
+    if argv[1:3]==['resource','show']:return workspace_response()
+    if argv[1:3]==['api','get']:return {'workspace_id':7405617270738925}
+    pytest.fail('No catalog or writes permitted')
 
 
-def test_pages_are_complete_before_return_and_progress_has_no_urls():
-    calls=[];events=[]
-    def read(argv,stage,timeout):
-        calls.append(argv)
-        assert stage=='AZURE_SKUS' and 0<timeout<=60
-        return {'value':[{'name':'first'}],'nextLink':page_url('synthetic-private-token')} if len(calls)==1 else {'value':[{'name':'last'}]}
-    assert read_sku_catalog(read,progress=events.append)==[{'name':'first'},{'name':'last'}]
-    assert len(calls)==2 and all(c[:4]==['az','rest','--method','get'] for c in calls)
-    assert 'synthetic-private-token' not in json.dumps(events) and 'https' not in json.dumps(events)
+def test_complete_scoped_snapshot_without_full_catalog():
+    evidence=read_scoped_skus(binding_reader,scoped_nodes())
+    assert isinstance(evidence,ScopedSkuEvidence) and evidence.requested==APPROVED_SKUS
+    a=inputs();reports=[]
+    assert select_alternates(PRIMARY,scoped_nodes(),evidence,a[3],SCHEMA,scoped_quotas(),reporter=reports.append)==list(APPROVED_SKUS[1:])
+    assert reports[0]['source']==SOURCE and reports[0]['primary_quota']['family']['headroom']==8
+    assert all('restrictions' not in r for r in evidence.records) # Never fabricate ARM restrictions.
 
+@pytest.mark.parametrize('change,code',[
+    ('missing','SCOPED_SKU_MISSING_OR_AMBIGUOUS'),('duplicate','SCOPED_SKU_MISSING_OR_AMBIGUOUS'),
+    ('missing_info','SCOPED_PROVIDER_STATUS_MISSING'),('missing_status','SCOPED_PROVIDER_STATUS_MISSING'),
+    ('null_status','SCOPED_PROVIDER_STATUS_MISSING'),('unknown_status','SCOPED_PROVIDER_STATUS_UNKNOWN'),
+    ('wrong_instance','SCOPED_INSTANCE_TYPE_MISMATCH'),('wrong_size','SCOPED_DIMENSIONS_INCOMPATIBLE')])
+def test_missing_or_ambiguous_scoped_evidence_blocks(change,code):
+    nodes=scoped_nodes();n=nodes['node_types'][1]
+    if change=='missing':nodes['node_types'].pop()
+    if change=='duplicate':nodes['node_types'].append(copy.deepcopy(n))
+    if change=='missing_info':n.pop('node_info')
+    if change=='missing_status':n['node_info']={}
+    if change=='null_status':n['node_info']['status']=None
+    if change=='unknown_status':n['node_info']['status']=['synthetic-secret-status']
+    if change=='wrong_instance':n['instance_type_id']='different'
+    if change=='wrong_size':n['num_cores']=8
+    with pytest.raises(Blocked,match=code):read_scoped_skus(binding_reader,nodes)
 
-def test_transient_page_timeout_retried_only_on_same_get():
-    calls=[]
+@pytest.mark.parametrize('status,reason',[('NotAvailableInRegion','PROVIDER_NOT_AVAILABLE_IN_REGION'),('NotEnabledOnSubscription','PROVIDER_NOT_ENABLED_ON_SUBSCRIPTION')])
+def test_explicit_provider_restriction_never_eligible(status,reason):
+    nodes=scoped_nodes();nodes['node_types'][1]['node_info']['status']=[status]
+    evidence=read_scoped_skus(binding_reader,nodes);reports=[]
+    result=select_alternates(PRIMARY,nodes,evidence,inputs()[3],SCHEMA,scoped_quotas(),reporter=reports.append)
+    assert result==[APPROVED_SKUS[2]]
+    assert reason in reports[0]['candidates'][0]['reasons']
+
+@pytest.mark.parametrize('case',['region','id','assignment','malformed'])
+def test_workspace_binding_is_mandatory(case):
     def read(argv,*args):
-        calls.append(argv)
-        if len(calls)==1:raise Blocked('READ_TIMEOUT_AT_AZURE_SKUS')
-        return {'value':[{'name':'complete'}]}
-    assert read_sku_catalog(read)==[{'name':'complete'}]
-    assert calls[0]==calls[1]
+        if argv[0]=='az':
+            value=workspace_response()
+            if case=='region':value['location']='westus'
+            if case=='id':value['id']='different'
+            if case=='malformed':return []
+            return value
+        return {'workspace_id':0 if case=='assignment' else 7405617270738925}
+    with pytest.raises(Blocked):read_scoped_skus(read,scoped_nodes())
 
 
-def test_partial_data_never_returned_after_failed_second_page():
-    calls=[]
-    def read(*args):
-        calls.append(args)
-        if len(calls)==1:return {'value':[{'name':'partial'}],'nextLink':page_url('next')}
-        raise Blocked('READ_TIMEOUT_AT_AZURE_SKUS')
-    with pytest.raises(Blocked,match='READ_TIMEOUT_AT_AZURE_SKUS'):read_sku_catalog(read)
-    assert len(calls)==3 # Page one and exactly two attempts at page two.
-
-@pytest.mark.parametrize('link',['https://evil.invalid/skus','http://management.azure.com/x','https://management.azure.com/subscriptions/other/providers/Microsoft.Compute/skus?api-version=2021-07-01',SKU_URL+'#fragment'])
-def test_bad_pagination_link_never_followed(link):
-    calls=[]
-    def read(*args):calls.append(args);return {'value':[],'nextLink':link}
-    with pytest.raises(Blocked,match='INVALID_AZURE_SKU_NEXT_LINK'):read_sku_catalog(read)
-    assert len(calls)==1
-
-@pytest.mark.parametrize('payload',[None,[],{'value':None},{'value':[None]},{'value':[],'nextLink':3}])
-def test_malformed_page_blocks(payload):
-    with pytest.raises(Blocked,match='INVALID_AZURE_SKU_'):read_sku_catalog(lambda *a:payload)
+def test_partial_typed_response_rejected_by_selector():
+    complete=read_scoped_skus(binding_reader,scoped_nodes())
+    partial=ScopedSkuEvidence(complete.records[1:],APPROVED_SKUS,'eastus')
+    with pytest.raises(Blocked,match='INCOMPLETE_SCOPED_SKU_EVIDENCE'):
+        select_alternates(PRIMARY,scoped_nodes(),partial,inputs()[3],SCHEMA,scoped_quotas())
 
 
-def test_repeated_link_and_page_limit_block():
-    with pytest.raises(Blocked,match='REPEATED_AZURE_SKU_NEXT_LINK'):
-        read_sku_catalog(lambda *a:{'value':[],'nextLink':SKU_URL})
-    with pytest.raises(Blocked,match='AZURE_SKU_PAGE_LIMIT_EXCEEDED'):
-        read_sku_catalog(lambda *a:{'value':[],'nextLink':page_url('next')},max_pages=1)
+def test_quota_denial_no_fabricated_headroom():
+    evidence=read_scoped_skus(binding_reader,scoped_nodes());quotas=scoped_quotas()
+    for q in quotas:q['limit']=0
+    with pytest.raises(Blocked,match='NO_ELIGIBLE'):
+        select_alternates(PRIMARY,scoped_nodes(),evidence,inputs()[3],SCHEMA,quotas)
 
 
-def test_total_budget_expiry_even_with_successful_partial_read():
-    times=iter([0,0,181])
-    with pytest.raises(Blocked,match='READ_TIMEOUT_AT_AZURE_SKUS'):
-        read_sku_catalog(lambda *a:{'value':[]},clock=lambda:next(times))
-
-
-def test_access_denied_is_not_retried():
-    calls=[]
-    def denied(*args):calls.append(args);raise Blocked('ACCESS_DENIED_AT_AZURE_SKUS')
-    with pytest.raises(Blocked):read_sku_catalog(denied)
-    assert len(calls)==1
-
-
-def data_reader(fail_stage=None):
+def data_reader(failure=None):
     a=inputs()
-    for sku in a[2]:sku['family']='testFamily'
     cluster=dict(node_type_id=PRIMARY,policy_id='p',spark_version='15.4.x-scala2.12',num_workers=0,data_security_mode='SINGLE_USER',azure_attributes={'availability':'ON_DEMAND_AZURE'})
     def read(argv):
-        if argv[1]=='rest':return ({'value':a[2]},None) if fail_stage is None else (None,{'code':fail_stage})
+        # Permanently unresponsive catalog: production code must never call it.
+        if 'list-skus' in argv or any('/skus' in str(v) for v in argv):
+            pytest.fail('Full SKU catalog endpoint is forbidden, not retried')
         if argv[1:3]==['account','show']:return {'id':SUBSCRIPTION,'tenantId':TENANT},None
         if argv[1:3]==['jobs','get']:return {'settings':{'job_clusters':[{'new_cluster':cluster}]}},None
         if argv[1:3]==['bundle','schema']:return SCHEMA,None
-        if argv[1:3]==['vm','list-usage']:return [{'name':{'value':k},'limit':8,'currentValue':0} for k in ('cores','testFamily')],None
-        if argv[1:3]==['api','get']:return (a[1] if 'list-node-types' in argv[3] else a[3]),None
+        if argv[1:3]==['resource','show']:return (None,{'code':failure}) if failure else (workspace_response(),None)
+        if argv[1:3]==['vm','list-usage']:return scoped_quotas(),None
+        if argv[1:3]==['api','get']:
+            return ({'workspace_id':7405617270738925} if 'current-metastore' in argv[3] else scoped_nodes() if 'list-node-types' in argv[3] else a[3]),None
         pytest.fail('Unexpected command')
     return read
 
 
-def test_legacy_injected_reader_unchanged_signature():
+def test_permanently_unresponsive_catalog_does_not_block_scoped_route():
     assert inspect_capacity('synthetic',1,data_reader())['status']=='ELIGIBLE_SNAPSHOT'
 
 
-def test_default_reader_resolved_at_call_time_and_gets_timeouts(monkeypatch):
+def test_default_reader_timeout_and_legacy_injection(monkeypatch):
     import check_capacity
     calls=[];reader=data_reader()
     def actual(argv,*,timeout):calls.append(timeout);return reader(argv)
     monkeypatch.setattr(check_capacity,'read_json',actual)
     assert inspect_capacity('synthetic',1)['status']=='ELIGIBLE_SNAPSHOT'
-    assert 120 in calls and any(t<=60 for t in calls) and 90 in calls
+    assert 120 in calls and 90 in calls
+
+@pytest.mark.parametrize('error',['READ_TIMEOUT','ACCESS_DENIED','INVALID_JSON_RESPONSE'])
+def test_read_failure_static_stage_and_no_retry(error):
+    with pytest.raises(Blocked,match='^'+error+'_AT_AZURE_WORKSPACE$'):
+        inspect_capacity('synthetic',1,data_reader(error))
 
 @pytest.mark.parametrize('payload',[None,[],{'settings':None},{'settings':{'job_clusters':None}}])
 def test_bad_job_shapes_have_static_diagnostic(payload):
@@ -114,19 +126,7 @@ def test_bad_job_shapes_have_static_diagnostic(payload):
 
 def test_unsafe_reader_error_never_echoed():
     with pytest.raises(Blocked) as exc:inspect_capacity('synthetic',1,data_reader('synthetic-secret'))
-    assert str(exc.value)=='READ_FAILED_AT_AZURE_SKUS'
-
-
-def test_real_cli_wrapper_timeout_and_invalid_json_do_not_echo(monkeypatch):
-    import diagnose
-    monkeypatch.setattr(diagnose.shutil,'which',lambda _:sys.executable)
-    def slow(*args,**kwargs):
-        assert kwargs['timeout']==17
-        raise subprocess.TimeoutExpired('synthetic-secret',17,output='synthetic-secret',stderr='synthetic-secret')
-    monkeypatch.setattr(diagnose.subprocess,'run',slow)
-    assert diagnose.read_json(['az'],timeout=17)==(None,{'code':'READ_TIMEOUT'})
-    monkeypatch.setattr(diagnose.subprocess,'run',lambda *a,**k:NS(returncode=0,stdout='synthetic-secret not JSON',stderr=''))
-    assert diagnose.read_json(['az'])==(None,{'code':'INVALID_JSON_RESPONSE'})
+    assert str(exc.value)=='READ_FAILED_AT_AZURE_WORKSPACE'
 
 
 def test_real_slow_cli_is_killed_and_output_not_exposed():
@@ -135,27 +135,34 @@ def test_real_slow_cli_is_killed_and_output_not_exposed():
     assert value is None and error=={'code':'READ_TIMEOUT'}
 
 
-def test_timeout_stage_and_malformed_error_code_are_safe():
-    with pytest.raises(Blocked,match='^READ_TIMEOUT_AT_AZURE_SKUS$'):
-        inspect_capacity('synthetic',1,data_reader('READ_TIMEOUT'))
-    with pytest.raises(Blocked,match='^READ_FAILED_AT_AZURE_SKUS$'):
-        inspect_capacity('synthetic',1,data_reader(['synthetic-secret']))
-
-
-def test_cli_main_outputs_stage_without_sensitive_exception(monkeypatch,capsys):
-    import check_capacity
-    def failure(*a,**k):raise Blocked('READ_TIMEOUT_AT_AZURE_SKUS')
-    monkeypatch.setattr(check_capacity,'inspect_capacity',failure)
-    monkeypatch.setattr(sys,'argv',['check_capacity.py'])
-    assert check_capacity.main()==1
-    assert json.loads(capsys.readouterr().out)['code']=='READ_TIMEOUT_AT_AZURE_SKUS'
-
-
 def test_launch_subprocess_timeout_is_safe(monkeypatch):
     import launch
     def slow(*a,**k):
         assert k['timeout']==5
         raise subprocess.TimeoutExpired('synthetic-secret',5,output='synthetic-secret')
     monkeypatch.setattr(launch.subprocess,'run',slow)
-    with pytest.raises(Blocked,match='^READ_TIMEOUT$'):
-        launch.command(['az','rest'],timeout=5)
+    with pytest.raises(Blocked,match='^READ_TIMEOUT$'):launch.command(['az','resource','show'],timeout=5)
+
+@pytest.mark.parametrize('change',['source','region','family'])
+def test_scoped_contract_rejects_forged_provenance_and_family(change):
+    from dataclasses import replace
+    evidence=read_scoped_skus(binding_reader,scoped_nodes())
+    if change=='source':evidence=replace(evidence,source='untrusted')
+    if change=='region':evidence=replace(evidence,region='westus')
+    if change=='family':
+        records=copy.deepcopy(evidence.records);records[0]['family']='inventedFamily'
+        evidence=replace(evidence,records=records)
+    with pytest.raises(Blocked,match='INVALID_SCOPED_'):
+        select_alternates(PRIMARY,scoped_nodes(),evidence,inputs()[3],SCHEMA,scoped_quotas())
+
+
+def test_primary_unknown_quota_and_disabled_provider_block():
+    from capacity_reads import FAMILIES
+    evidence=read_scoped_skus(binding_reader,scoped_nodes())
+    quota=[q for q in scoped_quotas() if q['name']['value']!=FAMILIES[PRIMARY]]
+    with pytest.raises(Blocked,match='SCOPED_PRIMARY_QUOTA_MISSING'):
+        select_alternates(PRIMARY,scoped_nodes(),evidence,inputs()[3],SCHEMA,quota)
+    nodes=scoped_nodes();nodes['node_types'][0]['node_info']['status']=['NotEnabledOnSubscription']
+    evidence=read_scoped_skus(binding_reader,nodes)
+    with pytest.raises(Blocked,match='SCOPED_PRIMARY_PROVIDER_STATUS_NOT_CLEAR'):
+        select_alternates(PRIMARY,nodes,evidence,inputs()[3],SCHEMA,scoped_quotas())

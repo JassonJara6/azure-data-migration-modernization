@@ -3,7 +3,7 @@ import argparse
 import json
 import re
 import sys
-from capacity_reads import read_sku_catalog
+from capacity_reads import read_scoped_skus
 from compute_capacity import select_alternates
 from diagnose import read_json,SUBSCRIPTION,TENANT
 from plan_guard import Blocked,require
@@ -39,7 +39,7 @@ def inspect_capacity(profile,job_id,reader=None,*,progress=None):
     require(isinstance(policy_id,str) and re.fullmatch(r'[A-Za-z0-9_-]+',policy_id),'INVALID_POLICY_ID')
     nodes=read(['databricks','api','get','/api/2.0/clusters/list-node-types'],'WORKSPACE_NODE_TYPES')
     schema=read(['databricks','bundle','schema'],'BUNDLE_SCHEMA')
-    skus=read_sku_catalog(read,progress=progress)
+    skus=read_scoped_skus(read,nodes,progress=progress)
     usages=read(['az','vm','list-usage','--subscription',SUBSCRIPTION,'--location','eastus','--output','json'],'AZURE_QUOTAS',120)
     require(isinstance(usages,list),'INVALID_AZURE_QUOTAS_RESPONSE')
     policy=read(['databricks','api','get','/api/2.0/policies/clusters/get?policy_id='+policy_id],'COMPUTE_POLICY')

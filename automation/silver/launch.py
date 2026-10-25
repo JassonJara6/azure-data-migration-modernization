@@ -17,7 +17,7 @@ import tempfile
 import urllib.parse
 import yaml
 from plan_guard import Blocked,require,review,sha,comparison_sha
-from capacity_reads import read_sku_catalog
+from capacity_reads import read_scoped_skus
 from compute_capacity import select_alternates,check_run_result
 from notebook_guard import verify_deployed_task
 from bundle_overlay import ephemeral_bundle
@@ -324,9 +324,9 @@ class Launcher:
         # All calls are read-only. Catalog availability is not live capacity.
         self.preflight_step='bundle_schema'
         schema=command(['databricks','bundle','schema'],env=self.ws_env,json_output=True,timeout=90)
-        self.preflight_step='azure_skus'
+        self.preflight_step='scoped_skus'
         def read_page(argv,stage,timeout):
-            try:return command(argv,env=self.env,json_output=True,timeout=timeout)
+            try:return command(argv,env=self.ws_env if argv[0]=='databricks' else self.env,json_output=True,timeout=timeout)
             except Blocked as exc:
                 code=str(exc)
                 if code!='READ_TIMEOUT':
@@ -335,7 +335,7 @@ class Launcher:
                 if code in ('READ_TIMEOUT','CONNECTIVITY_FAILED','DNS_FAILED'):
                     raise Blocked(code+'_AT_'+stage) from None
                 raise
-        skus=read_sku_catalog(read_page,progress=lambda event:print(json.dumps(event),file=sys.stderr,flush=True))
+        skus=read_scoped_skus(read_page,nodes,progress=lambda event:print(json.dumps(event),file=sys.stderr,flush=True))
         self.preflight_step='azure_quotas'
         usages=command(['az','vm','list-usage','--location','eastus','--subscription',SUBSCRIPTION,'--output','json'],env=self.env,json_output=True,timeout=120)
         require(isinstance(usages,list),'INVALID_AZURE_QUOTAS_RESPONSE')

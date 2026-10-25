@@ -1,5 +1,9 @@
 # Silver compute capacity (East US)
 
+**Current read path:** [Issue #33](ISSUE-33.md) replaces the full ARM SKU
+catalog strategy below with explicitly scoped Databricks provider evidence.
+Older catalog/pagination instructions are historical, not the production path.
+
 ## Diagnosis and supported route
 
 The operator reported Job `210884055971910`, failed run `698409497747491`,

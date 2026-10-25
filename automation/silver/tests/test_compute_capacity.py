@@ -97,14 +97,15 @@ def test_launcher_read_only_preflight_propagates_selected_driver_list(monkeypatc
     def command(argv,**kwargs):
         calls.append(argv)
         if argv[1:3]==['bundle','schema']:return SCHEMA
-        if argv[1]=='rest':return {'value':a[2]}
-        if argv[1:3]==['vm','list-usage']:return quotas
+        if argv[1:3]==['resource','show']:return workspace_response()
+        if argv[1:3]==['api','get']:return {'workspace_id':7405617270738925}
+        if argv[1:3]==['vm','list-usage']:return scoped_quotas()
         pytest.fail('Unexpected CLI mutation')
     def api(method,path):
         assert method=='get'
         if path.endswith('metastore_summary'):return {'metastore_id':'m'}
         if path.endswith('spark-versions'):return {'versions':[{'key':'15.4.x-scala2.12'}]}
-        if path.endswith('list-node-types'):return a[1]
+        if path.endswith('list-node-types'):return scoped_nodes()
         if '/policies/' in path:return a[3]
         if '/permissions/' in path:return {'privilege_assignments':[{'principal':'runner','privileges':['READ_VOLUME']}]}
         pytest.fail('Unexpected API')
@@ -113,4 +114,19 @@ def test_launcher_read_only_preflight_propagates_selected_driver_list(monkeypatc
     uc=dict(metastore_id='m',node_type_id=PRIMARY,policy_id='p',catalog='admm_dev',runner_application_id='runner',operator='op')
     obj.check_workspace(uc)
     assert uc['driver_alternate_node_type_ids']==ALTERNATES[PRIMARY]
-    assert len(calls)==3
+    assert len(calls)==4
+
+
+def scoped_nodes():
+    from capacity_reads import APPROVED_SKUS
+    return {'node_types':[{'node_type_id':name,'instance_type_id':name,'num_cores':4.0,'memory_mb':16384,'node_info':{'status':[]}} for name in APPROVED_SKUS]}
+
+
+def workspace_response():
+    from capacity_reads import WORKSPACE_RESOURCE_ID
+    return {'id':WORKSPACE_RESOURCE_ID,'location':'eastus','properties':{'workspaceId':'7405617270738925'}}
+
+
+def scoped_quotas():
+    from capacity_reads import FAMILIES
+    return [{'name':{'value':key},'limit':8,'currentValue':0} for key in ('cores',*FAMILIES.values())]

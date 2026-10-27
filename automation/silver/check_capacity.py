@@ -4,6 +4,7 @@ import json
 import re
 import sys
 from capacity_reads import read_scoped_skus
+from single_node_v4 import PRIMARY,read_evidence,validate_policy,validate_cluster
 from compute_capacity import select_alternates
 from diagnose import read_json,SUBSCRIPTION,TENANT
 from plan_guard import Blocked,require
@@ -38,6 +39,12 @@ def inspect_capacity(profile,job_id,reader=None,*,progress=None):
     policy_id=cluster.get('policy_id','')
     require(isinstance(policy_id,str) and re.fullmatch(r'[A-Za-z0-9_-]+',policy_id),'INVALID_POLICY_ID')
     nodes=read(['databricks','api','get','/api/2.0/clusters/list-node-types'],'WORKSPACE_NODE_TYPES')
+    if cluster.get('node_type_id')==PRIMARY:
+        validate_cluster(cluster)
+        report=read_evidence(read,nodes)
+        policy=read(['databricks','api','get','/api/2.0/policies/clusters/get?policy_id='+policy_id],'COMPUTE_POLICY')
+        validate_policy(policy,cluster.get('single_user_name'))
+        return report
     schema=read(['databricks','bundle','schema'],'BUNDLE_SCHEMA')
     skus=read_scoped_skus(read,nodes,progress=progress)
     usages=read(['az','vm','list-usage','--subscription',SUBSCRIPTION,'--location','eastus','--output','json'],'AZURE_QUOTAS',120)

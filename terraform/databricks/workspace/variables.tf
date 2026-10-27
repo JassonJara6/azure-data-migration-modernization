@@ -37,9 +37,9 @@ variable "catalog_name" {
 }
 variable "node_type_id" {
   type    = string
-  default = "Standard_D4ds_v5"
+  default = "Standard_D4ds_v4"
   validation {
-    condition     = contains(["Standard_D4ds_v5", "Standard_D4as_v5"], var.node_type_id)
+    condition     = contains(["Standard_D4ds_v4", "Standard_D4ds_v5", "Standard_D4as_v5"], var.node_type_id)
     error_message = "Use an approved four-vCPU dev SKU; larger sizes require a reviewed policy change."
   }
 }

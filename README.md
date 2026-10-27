@@ -2,7 +2,7 @@
 
 A production-style, portfolio-sized data platform that will move the AdventureWorks OLTP data through Azure Data Factory, ADLS Gen2, and Azure Databricks into a dimensional model.
 
-> **Current plan:** Phase 1 source/platform foundation is complete. Phase 2 Bronze has one real COMMITTED parent with eleven loads, reported by the operator (`20d65511-8190-41a0-8ad2-23d7568363d2`); Azure R2 is still pending. **Phase 3 Silver** now has [PySpark/Delta code, Unity Catalog configuration, a single Databricks Job and local tests](databricks/silver/README.md); real Databricks validation is pending. Historical `phase-3-*` documents refer to Bronze and retain their original names.
+> **Current plan:** Phase 1 foundation and **Phase 2 Bronze R1 are complete**: one real COMMITTED parent with eleven reconciled loads, reported by the operator (`20d65511-8190-41a0-8ad2-23d7568363d2`); Azure R2 remains pending. **Phase 3 Silver is validated locally: 50/50 tests passed** with Python 3.11, Java 17, PySpark 3.5.3 and Delta Lake 3.2.1 ([report and evidence](docs/validation/silver/INFORME-VALIDACION-LOCAL-SILVER.md)). **Silver integration/acceptance in Azure remains pending because of compute-capacity restrictions; Azure Free Trial is retained.** These local results do not demonstrate materialization of the eleven real Silver tables in Azure. Historical `phase-3-*` documents refer to Bronze and retain their original names.
 
 ## Target architecture
 
@@ -62,7 +62,8 @@ Empty phase directories contain `.gitkeep` files solely to make the planned boun
 
 - [x] **Phase 1:** local source, source contract and platform foundation.
 - [x] **Phase 2 — Bronze R1:** real parent COMMITTED with eleven reconciled loads, per operator evidence; [R2 acceptance](adf/docs/bronze-end-to-end-rollout.md) remains pending. The ADF confirmation block is retained; external SQL receipts represent confirmation.
-- [ ] **Phase 3 — Silver:** implementation and automated local validation in this repository; [one-Job Databricks acceptance](databricks/silver/README.md) pending deployment/configuration and a real run.
+- [x] **Phase 3 — Silver local validation:** 50/50 tests passed; eleven synthetic sources, FULL/incremental MERGE, interrupted-run recovery and replay without new Delta versions ([evidence](docs/validation/silver/INFORME-VALIDACION-LOCAL-SILVER.md)).
+- [ ] **Phase 3 — Silver Azure integration:** real [one-Job acceptance](databricks/silver/README.md) remains blocked by compute capacity under **Azure Free Trial**. Local validation does not certify real Azure data, Unity Catalog or runner permissions.
 - [ ] Gold and later delivery phases remain outside this change.
 
 The repository retains historical phase numbers in source/metadata/ADF and Terraform runbooks. Current Silver documentation governs this increment and does not rename or reset earlier work. Existing infrastructure definitions remain documented in the [bootstrap](terraform/bootstrap/README.md) and [dev Terraform root](terraform/environments/dev/README.md).

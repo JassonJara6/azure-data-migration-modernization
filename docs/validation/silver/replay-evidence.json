@@ -1,0 +1,126 @@
+{
+  "status": "LOCAL_REPLAY_VERIFIED",
+  "fixtures": "SYNTHETIC_LOCAL_PARQUET",
+  "python": "3.11.17",
+  "java": "17.0.17",
+  "spark": "3.5.3",
+  "delta_spark": "3.2.1",
+  "pyarrow": "19.0.1",
+  "full_sources": [
+    "Person.StateProvince",
+    "Person.CountryRegion",
+    "Production.ProductCategory",
+    "Production.ProductSubcategory",
+    "Sales.Customer",
+    "Sales.SalesTerritory"
+  ],
+  "incremental_sources": [
+    "Person.Person",
+    "Person.Address",
+    "Production.Product",
+    "Sales.SalesOrderHeader",
+    "Sales.SalesOrderDetail"
+  ],
+  "metrics": {
+    "Person.Address": {
+      "input_rows": 1,
+      "rejected_rows": 0,
+      "target_rows": 1,
+      "target_version": 0
+    },
+    "Person.CountryRegion": {
+      "input_rows": 1,
+      "rejected_rows": 0,
+      "target_rows": 1,
+      "target_version": 0
+    },
+    "Person.Person": {
+      "input_rows": 1,
+      "rejected_rows": 0,
+      "target_rows": 1,
+      "target_version": 1
+    },
+    "Person.StateProvince": {
+      "input_rows": 1,
+      "rejected_rows": 0,
+      "target_rows": 1,
+      "target_version": 0
+    },
+    "Production.Product": {
+      "input_rows": 1,
+      "rejected_rows": 0,
+      "target_rows": 1,
+      "target_version": 0
+    },
+    "Production.ProductCategory": {
+      "input_rows": 1,
+      "rejected_rows": 0,
+      "target_rows": 1,
+      "target_version": 0
+    },
+    "Production.ProductSubcategory": {
+      "input_rows": 1,
+      "rejected_rows": 0,
+      "target_rows": 1,
+      "target_version": 0
+    },
+    "Sales.Customer": {
+      "input_rows": 1,
+      "rejected_rows": 0,
+      "target_rows": 1,
+      "target_version": 0
+    },
+    "Sales.SalesOrderDetail": {
+      "input_rows": 1,
+      "rejected_rows": 0,
+      "target_rows": 1,
+      "target_version": 0
+    },
+    "Sales.SalesOrderHeader": {
+      "input_rows": 1,
+      "rejected_rows": 0,
+      "target_rows": 1,
+      "target_version": 0
+    },
+    "Sales.SalesTerritory": {
+      "input_rows": 1,
+      "rejected_rows": 0,
+      "target_rows": 1,
+      "target_version": 0
+    }
+  },
+  "versions_before": {
+    "person_person": 1,
+    "person_address": 0,
+    "person_stateprovince": 0,
+    "person_countryregion": 0,
+    "production_product": 0,
+    "production_productcategory": 0,
+    "production_productsubcategory": 0,
+    "sales_customer": 0,
+    "sales_salesorderheader": 0,
+    "sales_salesorderdetail": 0,
+    "sales_salesterritory": 0,
+    "_silver_batches": 3,
+    "_silver_progress": 10
+  },
+  "versions_after": {
+    "person_person": 1,
+    "person_address": 0,
+    "person_stateprovince": 0,
+    "person_countryregion": 0,
+    "production_product": 0,
+    "production_productcategory": 0,
+    "production_productsubcategory": 0,
+    "sales_customer": 0,
+    "sales_salesorderheader": 0,
+    "sales_salesorderdetail": 0,
+    "sales_salesterritory": 0,
+    "_silver_batches": 3,
+    "_silver_progress": 10
+  },
+  "tables_checked": 13,
+  "delta_versions_unchanged": true,
+  "recovery_after_interruption": "EXISTING_TEST_ASSERTIONS",
+  "azure_execution": "NOT_PERFORMED"
+}

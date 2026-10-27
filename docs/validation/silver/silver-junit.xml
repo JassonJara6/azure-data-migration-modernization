@@ -1,0 +1,55 @@
+<?xml version='1.0' encoding='utf-8'?>
+<testsuites name="pytest tests">
+  <testsuite name="pytest" errors="0" failures="0" skipped="0" tests="50" time="179.590" timestamp="2026-10-27T18:24:29.824575+00:00">
+    <testcase classname="tests.test_evidence_diagnostics" name="test_demonstrable_json_shape_errors_are_contract_errors[null-RECEIPT_OBJECT_REQUIRED]" time="0.002" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_demonstrable_json_shape_errors_are_contract_errors[[]-RECEIPT_OBJECT_REQUIRED]" time="0.001" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_demonstrable_json_shape_errors_are_contract_errors[{}-RECEIPT_PARENT_REQUIRED]" time="0.001" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_demonstrable_json_shape_errors_are_contract_errors[{&quot;parent_run_id&quot;:null}-RECEIPT_PARENT_REQUIRED]" time="0.001" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_demonstrable_json_shape_errors_are_contract_errors[{&quot;parent_run_id&quot;:&quot;other&quot;}-REQUESTED_PARENT_MISMATCH]" time="0.001" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_valid_receipt_preserved" time="0.001" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_io_and_parse_diagnostics_hide_sensitive_details[missing]" time="0.001" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_io_and_parse_diagnostics_hide_sensitive_details[permission]" time="0.001" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_io_and_parse_diagnostics_hide_sensitive_details[read]" time="0.001" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_io_and_parse_diagnostics_hide_sensitive_details[encoding]" time="0.001" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_io_and_parse_diagnostics_hide_sensitive_details[json]" time="0.001" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_io_and_parse_diagnostics_hide_sensitive_details[duplicate]" time="0.001" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_exact_io_line_and_nonstatic_error_code_redacted" time="0.003" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_notebook_reports_evidence_failure_before_pipeline" time="0.002" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_volume_receipt_driver_read_is_complete_utf8" time="0.001" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_notebook_rejects_wrong_installed_distribution_before_ingestion[None]" time="0.003" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_notebook_rejects_wrong_installed_distribution_before_ingestion[0.1.0+e86a2e0b709b]" time="0.002" />
+    <testcase classname="tests.test_evidence_diagnostics" name="test_notebook_rejects_wrong_installed_distribution_before_ingestion[IO_ERROR]" time="0.001" />
+    <testcase classname="tests.test_silver" name="test_registry_matches_existing_bronze_contract" time="0.001" />
+    <testcase classname="tests.test_silver" name="test_bundle_checks_real_hashes_files_and_receipts" time="0.060" />
+    <testcase classname="tests.test_silver" name="test_invalid_evidence_fails_closed[&lt;lambda&gt;0]" time="0.012" />
+    <testcase classname="tests.test_silver" name="test_invalid_evidence_fails_closed[&lt;lambda&gt;1]" time="0.015" />
+    <testcase classname="tests.test_silver" name="test_invalid_evidence_fails_closed[&lt;lambda&gt;2]" time="0.012" />
+    <testcase classname="tests.test_silver" name="test_invalid_evidence_fails_closed[&lt;lambda&gt;3]" time="0.012" />
+    <testcase classname="tests.test_silver" name="test_invalid_evidence_fails_closed[&lt;lambda&gt;4]" time="0.012" />
+    <testcase classname="tests.test_silver" name="test_checkpoint_gap_and_out_of_order_rejected" time="0.000" />
+    <testcase classname="tests.test_silver" name="test_each_table_preserves_business_and_100ns[0]" time="10.344" />
+    <testcase classname="tests.test_silver" name="test_each_table_preserves_business_and_100ns[1]" time="1.404" />
+    <testcase classname="tests.test_silver" name="test_each_table_preserves_business_and_100ns[2]" time="2.089" />
+    <testcase classname="tests.test_silver" name="test_each_table_preserves_business_and_100ns[3]" time="0.810" />
+    <testcase classname="tests.test_silver" name="test_each_table_preserves_business_and_100ns[4]" time="1.552" />
+    <testcase classname="tests.test_silver" name="test_each_table_preserves_business_and_100ns[5]" time="0.830" />
+    <testcase classname="tests.test_silver" name="test_each_table_preserves_business_and_100ns[6]" time="0.826" />
+    <testcase classname="tests.test_silver" name="test_each_table_preserves_business_and_100ns[7]" time="0.873" />
+    <testcase classname="tests.test_silver" name="test_each_table_preserves_business_and_100ns[8]" time="1.426" />
+    <testcase classname="tests.test_silver" name="test_each_table_preserves_business_and_100ns[9]" time="1.021" />
+    <testcase classname="tests.test_silver" name="test_each_table_preserves_business_and_100ns[10]" time="0.871" />
+    <testcase classname="tests.test_silver" name="test_duplicate_composite_keys_and_business_rejections" time="0.842" />
+    <testcase classname="tests.test_silver" name="test_null_keys_and_schema_drift_are_not_dropped" time="0.909" />
+    <testcase classname="tests.test_silver" name="test_delta_full_snapshot_and_incremental_merge" time="12.864" />
+    <testcase classname="tests.test_silver" name="test_complete_parent_and_replay_without_delta_writes" time="125.526" />
+    <testcase classname="tests.test_silver" name="test_quality_failure_quarantines_and_does_not_publish" time="10.784" />
+    <testcase classname="tests.test_silver" name="test_equal_timestamps_composite_upper_is_lexicographic" time="0.560" />
+    <testcase classname="tests.test_silver" name="test_lossy_decimal_cast_is_rejected" time="0.529" />
+    <testcase classname="tests.test_silver" name="test_string_timestamp_keeps_seventh_digit" time="0.510" />
+    <testcase classname="tests.test_silver" name="test_int96_submicroseconds_fail_instead_of_truncating" time="0.007" />
+    <testcase classname="tests.test_silver" name="test_missing_relationship_is_detected" time="3.491" />
+    <testcase classname="tests.test_silver" name="test_bundle_job_configuration_is_serial_and_secret_free" time="0.057" />
+    <testcase classname="tests.test_silver" name="test_databricks_volume_binding_must_match_real_container" time="0.001" />
+    <testcase classname="tests.test_silver" name="test_sql_export_is_read_only_and_collects_actual_receipts" time="0.926" />
+  </testsuite>
+</testsuites>

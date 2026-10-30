@@ -18,6 +18,8 @@ import urllib.parse
 import yaml
 from plan_guard import Blocked,require,review,sha,comparison_sha
 from capacity_reads import read_scoped_skus
+from azure_cli import native_argv
+from single_node_v4 import PRIMARY as V4,read_evidence as read_v4_evidence,validate_policy as validate_v4_policy,validate_cluster as validate_v4_cluster
 from compute_capacity import select_alternates,check_run_result,ALTERNATES
 from runtime_report import safe_task_failure
 from notebook_guard import verify_deployed_task,notebook_signature
@@ -42,7 +44,7 @@ def command(args,*,cwd=ROOT,env=None,json_output=False,allowed=(0,),interactive=
         args+=['--profile',env['DATABRICKS_CONFIG_PROFILE']]
     program=shutil.which(str(args[0])) or str(args[0])
     try:
-        result=subprocess.run([program,*map(str,args[1:])],cwd=cwd,env=env,
+        result=subprocess.run(native_argv(program,args),cwd=cwd,env=env,
            text=True,encoding='utf-8',errors='strict',capture_output=not interactive,timeout=timeout)
     except subprocess.TimeoutExpired:
         raise Blocked('READ_TIMEOUT') from None
@@ -148,7 +150,9 @@ class Launcher:
         self.tf(root,'validate')
     def outputs(self,root):
         return self.tf(root,'output','-json',json_output=True)
-    def plan(self,root,stage,variables,*,before_apply=None):
+    def plan(self,root,stage,variables,*,before_apply=None,policy_only=False):
+        from v4_transition import review_policy_plan
+        plan_review=review_policy_plan if policy_only else review
         # Never overwrite another invocation's pending approval/review artifacts.
         plans=self.work/'plans';plans.mkdir(mode=0o700,parents=True,exist_ok=True)
         run=Path(tempfile.mkdtemp(prefix=stage+'-',dir=plans))
@@ -159,7 +163,7 @@ class Launcher:
         fingerprint=sha(saved) # SHA-256 of ALL saved binary bytes, before any rendering.
         plan=self.tf(root,'show','-json',str(saved),json_output=True)
         require(sha(saved)==fingerprint,'PLAN_CHANGED_DURING_REVIEW')
-        changes=review(plan,stage)
+        changes=plan_review(plan,stage)
         rendered=self.tf(root,'show','-no-color',str(saved))
         require(sha(saved)==fingerprint,'PLAN_CHANGED_DURING_REVIEW')
         human=run/'plan.txt';human.write_text(rendered,encoding='utf-8')
@@ -181,7 +185,7 @@ class Launcher:
             require(sha(human)==text_fingerprint,'PLAN_REVIEW_TEXT_CHANGED_AFTER_APPROVAL')
             current=self.tf(root,'show','-json',str(saved),json_output=True)
             require(sha(saved)==fingerprint,'PLAN_CHANGED_AFTER_APPROVAL')
-            require(review(current,stage)==changes,'PLAN_REVIEW_CHANGED')
+            require(plan_review(current,stage)==changes,'PLAN_REVIEW_CHANGED')
             require(current==plan,'PLAN_CONTENT_CHANGED_AFTER_APPROVAL')
             if before_apply:before_apply() # Recheck authorization after the human wait.
             require(sha(human)==text_fingerprint,'PLAN_REVIEW_TEXT_CHANGED_AFTER_APPROVAL')
@@ -343,17 +347,24 @@ class Launcher:
                     if code in ('READ_TIMEOUT','CONNECTIVITY_FAILED','DNS_FAILED'):
                         raise Blocked(code+'_AT_'+stage) from None
                     raise
-            skus=read_scoped_skus(read_page,nodes,progress=lambda event:print(json.dumps(event),file=sys.stderr,flush=True))
-            self.preflight_step='azure_quotas'
-            usages=command(['az','vm','list-usage','--location','eastus','--subscription',SUBSCRIPTION,'--output','json'],env=self.env,json_output=True,timeout=120)
-            require(isinstance(usages,list),'INVALID_AZURE_QUOTAS_RESPONSE')
-            self.preflight_step='compute_policy'
-            policy=self.api('get','/api/2.0/policies/clusters/get?policy_id='+urllib.parse.quote(uc['policy_id'],safe=''))
-            self.preflight_step='select_alternates'
-            uc['driver_alternate_node_type_ids']=select_alternates(uc['node_type_id'],nodes,skus,policy,schema,usages,reporter=lambda report:print(json.dumps(report,sort_keys=True)))
-            print(json.dumps({'status':'SILVER_COMPUTE_PREFLIGHT','primary':uc['node_type_id'],
-                'driver_alternates':uc['driver_alternate_node_type_ids'],'region':'eastus',
-                'live_capacity':'NOT_GUARANTEED','quota':'REGIONAL_AND_FAMILY_SNAPSHOT_CHECKED'}))
+            if uc['node_type_id']==V4:
+                report=read_v4_evidence(read_page,nodes)
+                policy=self.api('get','/api/2.0/policies/clusters/get?policy_id='+uc['policy_id'])
+                validate_v4_policy(policy,uc['runner_application_id'])
+                uc['driver_alternate_node_type_ids']=[]
+                print(json.dumps(report,sort_keys=True))
+            else:
+                skus=read_scoped_skus(read_page,nodes,progress=lambda event:print(json.dumps(event),file=sys.stderr,flush=True))
+                self.preflight_step='azure_quotas'
+                usages=command(['az','vm','list-usage','--location','eastus','--subscription',SUBSCRIPTION,'--output','json'],env=self.env,json_output=True,timeout=120)
+                require(isinstance(usages,list),'INVALID_AZURE_QUOTAS_RESPONSE')
+                self.preflight_step='compute_policy'
+                policy=self.api('get','/api/2.0/policies/clusters/get?policy_id='+urllib.parse.quote(uc['policy_id'],safe=''))
+                self.preflight_step='select_alternates'
+                uc['driver_alternate_node_type_ids']=select_alternates(uc['node_type_id'],nodes,skus,policy,schema,usages,reporter=lambda report:print(json.dumps(report,sort_keys=True)))
+                print(json.dumps({'status':'SILVER_COMPUTE_PREFLIGHT','primary':uc['node_type_id'],
+                    'driver_alternates':uc['driver_alternate_node_type_ids'],'region':'eastus',
+                    'live_capacity':'NOT_GUARANTEED','quota':'REGIONAL_AND_FAMILY_SNAPSHOT_CHECKED'}))
         else:
             print(json.dumps({'status':'ARTIFACT_PUBLICATION_ONLY','capacity':'NOT_VERIFIED','execution':'BLOCKED'}))
         self.preflight_step='input_volume_permissions'
@@ -388,14 +399,15 @@ class Launcher:
                 cluster.get('data_security_mode')=='SINGLE_USER' and cluster.get('single_user_name')==uc['runner_application_id'] and
                 cluster.get('azure_attributes',{}).get('availability')=='ON_DEMAND_AZURE' and
                 settings.get('run_as',{}).get('service_principal_name')==uc['runner_application_id'],'EXISTING_COMPUTE_CONSTRAINTS_CHANGED')
-            require(uc['node_type_id'] in ('Standard_D4ds_v5','Standard_D4as_v5') and
+            require(uc['node_type_id'] in ('Standard_D4ds_v5','Standard_D4as_v5',V4) and
                 cluster.get('driver_node_type_id',uc['node_type_id'])==uc['node_type_id'] and
                 not cluster.get('autoscale') and not cluster.get('instance_pool_id') and not cluster.get('driver_instance_pool_id'),'EXISTING_COMPUTE_COST_CONSTRAINTS_CHANGED')
             flexibility=cluster.get('driver_node_type_flexibility') or {}
             require(isinstance(flexibility,dict),'EXISTING_FLEXIBILITY_CONTRACT_MISMATCH')
             alternates=flexibility.get('alternate_node_type_ids',[])
             require(isinstance(alternates,list) and all(isinstance(a,str) for a in alternates) and len(alternates)==len(set(alternates)) and
-                all(a in ALTERNATES[uc['node_type_id']] for a in alternates),'EXISTING_FLEXIBILITY_CONTRACT_MISMATCH')
+                all(a in ALTERNATES.get(uc['node_type_id'],[]) for a in alternates),'EXISTING_FLEXIBILITY_CONTRACT_MISMATCH')
+            if uc['node_type_id']==V4:validate_v4_cluster(cluster)
             spec['resources']['jobs']['silver']['job_clusters']=clusters
         parent=self.c.get('parent_run_id',PARENT);uuid(parent)
         uri=uc['receipt_volume']+'/'+parent+'.json'
@@ -464,13 +476,14 @@ class Launcher:
         job_id=resources['resources']['jobs']['silver']['id']
         if getattr(self,'deploy_only',False):require(str(job_id)==str(owned['job_id']),'PUBLISHED_JOB_ID_MISMATCH')
         job_record.write_text(json.dumps({'job_id':job_id,'host':workspace['workspace_host']}))
-        # Grant only code/artifact subtrees; deployment state remains operator-only.
-        bundle_root=validated['workspace']['root_path'].removeprefix('/Workspace')
-        acl=json.dumps({'access_control_list':[{'service_principal_name':uc['runner_application_id'],'permission_level':'CAN_READ'}]})
-        for subtree in ('files','artifacts'):
-            folder=command(['databricks','workspace','get-status',bundle_root+'/'+subtree,'--output','json'],env=self.ws_env,json_output=True)
-            require(folder['object_type']=='DIRECTORY','BUNDLE_ARTIFACT_ROOT_NOT_DIRECTORY')
-            command(['databricks','permissions','update','directories',str(folder['object_id']),'--json',acl],env=self.ws_env)
+        if uc['node_type_id']!=V4:
+            # Grant only code/artifact subtrees; deployment state remains operator-only.
+            bundle_root=validated['workspace']['root_path'].removeprefix('/Workspace')
+            acl=json.dumps({'access_control_list':[{'service_principal_name':uc['runner_application_id'],'permission_level':'CAN_READ'}]})
+            for subtree in ('files','artifacts'):
+                folder=command(['databricks','workspace','get-status',bundle_root+'/'+subtree,'--output','json'],env=self.ws_env,json_output=True)
+                require(folder['object_type']=='DIRECTORY','BUNDLE_ARTIFACT_ROOT_NOT_DIRECTORY')
+                command(['databricks','permissions','update','directories',str(folder['object_id']),'--json',acl],env=self.ws_env)
         verify_deployed_task(command,self.ws_env,job_id,validated['workspace']['root_path'],uc['runner_application_id'],expected_wheel=wheel,expected_notebook=stage/'notebooks/run_silver.py',expected_settings=validated['resources']['jobs']['silver'],expected_wheel_sha=approved_wheel_sha,expected_cells=approved_cells)
         if getattr(self,'deploy_only',False):
             report={'status':'ARTIFACTS_VERIFIED','job_id':job_id,'wheel_name':wheel.name,'wheel_sha256':approved_wheel_sha,'notebook_verification':'PYTHON_CELLS_MATCH','bundle_sha256':fingerprint,'execution':'NOT_STARTED','capacity':'NOT_VERIFIED'}

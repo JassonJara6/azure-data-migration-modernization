@@ -1,5 +1,7 @@
 # Issue #33: remove the unusable full SKU endpoint
 
+**Historical v5 route:** the restrictions below still govern that route. The separate [v4 Free Trial route](V4-FREE-TRIAL.md) uses a complete, bounded live ARM snapshot and real quotas; it does not reinterpret missing Databricks status as availability.
+
 ## Change and trust boundary
 
 Both production callers now use `read_scoped_skus`; neither calls

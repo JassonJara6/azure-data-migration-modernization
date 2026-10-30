@@ -1,4 +1,5 @@
 """Read-only bootstrap diagnostics. Never log raw CLI output or acquire/export tokens."""
+from azure_cli import native_argv
 import fnmatch
 import json
 import os
@@ -47,7 +48,7 @@ def read_json(args, *, timeout=60):
     if not program:
         return None, {'code': 'TOOL_MISSING', 'tool': args[0]}
     try:
-        result = subprocess.run([program, *args[1:]], text=True, encoding='utf-8', errors='strict', capture_output=True,
+        result = subprocess.run(native_argv(program,args), text=True, encoding='utf-8', errors='strict', capture_output=True,
                                 timeout=timeout, shell=False,
                                 env=dict(os.environ,PYTHONUTF8='1',PYTHONIOENCODING='utf-8'))
     except subprocess.TimeoutExpired:

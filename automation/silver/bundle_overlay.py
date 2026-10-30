@@ -1,5 +1,6 @@
 """Adapt PR #18 in an ignored staging directory; never edit its source bundle."""
 import copy
+from single_node_v4 import PRIMARY,NO_FALLBACK
 from plan_guard import require
 
 
@@ -29,7 +30,10 @@ def ephemeral_bundle(original,uc,host):
       'custom_tags':{'ResourceClass':'SingleNode','project':'admm','layer':'silver'},
       'azure_attributes':{'availability':'ON_DEMAND_AZURE'}}}]
     # Explicit driver fallback only: this single-node Job has no workers.
-    if uc.get('driver_alternate_node_type_ids'):
+    if uc['node_type_id']==PRIMARY:
+        job['job_clusters'][0]['new_cluster'].update(driver_node_type_id=PRIMARY,
+            driver_node_type_flexibility=copy.deepcopy(NO_FALLBACK),worker_node_type_flexibility=copy.deepcopy(NO_FALLBACK))
+    elif uc.get('driver_alternate_node_type_ids'):
         job['job_clusters'][0]['new_cluster']['driver_node_type_flexibility']={'alternate_node_type_ids':uc['driver_alternate_node_type_ids']}
     value['workspace']={'host':host,'root_path':'/Workspace/Shared/'+uc.get('catalog','admm_dev')+'/admm-silver/${bundle.target}'}
     # This staging copy has a separate local identity but stable deployment name.

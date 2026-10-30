@@ -141,7 +141,7 @@ resource "databricks_cluster_policy" "silver" {
   provider   = databricks.workspace
   depends_on = [data.databricks_service_principal.runner]
   name       = "${var.catalog_name}-silver-ephemeral"
-  definition = jsonencode({
+  definition = jsonencode(merge({
     spark_version                                 = { type = "fixed", value = "15.4.x-scala2.12" }
     node_type_id                                  = { type = "fixed", value = var.node_type_id }
     num_workers                                   = { type = "fixed", value = 0 }
@@ -152,7 +152,11 @@ resource "databricks_cluster_policy" "silver" {
     "custom_tags.ResourceClass"                   = { type = "fixed", value = "SingleNode" }
     "azure_attributes.availability"               = { type = "fixed", value = "ON_DEMAND_AZURE" }
     "cluster_type"                                = { type = "fixed", value = "job" }
-  })
+    }, var.node_type_id == "Standard_D4ds_v4" ? {
+    driver_node_type_id                                    = { type = "fixed", value = var.node_type_id }
+    "driver_node_type_flexibility.alternate_node_type_ids" = { type = "fixed", value = "" }
+    "worker_node_type_flexibility.alternate_node_type_ids" = { type = "fixed", value = "" }
+  } : {}))
 }
 resource "databricks_permissions" "policy_runner" {
   count             = var.runner_application_id == null ? 0 : 1

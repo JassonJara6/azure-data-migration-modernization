@@ -153,3 +153,7 @@ identidad/región ARM del workspace y cuotas reales; campos ausentes bloquean.
 Para actualizar un wheel/notebook antiguo sin arrancar cómputo, usar la
 [guía de publicación y verificación Silver](SILVER-RELEASE.md). La publicación
 no implica capacidad disponible ni éxito Silver; la ejecución conserva su gate.
+
+## Primaria v4 en Azure Free Trial
+
+Para la transición acotada del Job/política existentes, consultar [V4-FREE-TRIAL.md](V4-FREE-TRIAL.md). Preview por defecto; aplicar requiere aprobaciones por hash y nunca ejecuta Silver. Los cambios reales siguen pendientes de autorización.

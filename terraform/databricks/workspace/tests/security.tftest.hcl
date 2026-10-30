@@ -59,3 +59,21 @@ run "no_assumed_metastore" {
   }
   expect_failures = [var.metastore_id]
 }
+run "v4_single_node_policy_disables_all_fallback" {
+  command = plan
+  variables {
+    runner_application_id = "00000000-0000-0000-0000-000000000003"
+    node_type_id          = "Standard_D4ds_v4"
+  }
+  assert {
+    condition = (
+      jsondecode(databricks_cluster_policy.silver[0].definition).node_type_id.value == "Standard_D4ds_v4" &&
+      jsondecode(databricks_cluster_policy.silver[0].definition).driver_node_type_id.value == "Standard_D4ds_v4" &&
+      jsondecode(databricks_cluster_policy.silver[0].definition).num_workers.value == 0 &&
+      jsondecode(databricks_cluster_policy.silver[0].definition)["driver_node_type_flexibility.alternate_node_type_ids"].value == "" &&
+      jsondecode(databricks_cluster_policy.silver[0].definition)["worker_node_type_flexibility.alternate_node_type_ids"].value == "" &&
+      output.deployment.node_type_id == "Standard_D4ds_v4"
+    )
+    error_message = "V4 uses one fixed driver, zero workers, no implicit alternate nodes or new compute resources."
+  }
+}

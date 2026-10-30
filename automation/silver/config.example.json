@@ -6,7 +6,7 @@
   "catalog_name": "admm_dev",
   "metastore_id": null,
   "allow_create_metastore": false,
-  "node_type_id": "Standard_D4ds_v5",
+  "node_type_id": "Standard_D4ds_v4",
   "parent_run_id": "20d65511-8190-41a0-8ad2-23d7568363d2",
   "sql_server": "127.0.0.1,1433",
   "sql_user": "bronze_reconciler",

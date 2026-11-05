@@ -38,8 +38,8 @@ def harness(tmp_path,monkeypatch,*,apply=True,change=None):
         if argv[1:3]==['bundle','summary']:return {'resources':{'jobs':{'silver':{'id':JOB_ID}}}}
         assert argv[:4]==['databricks','api','post','/api/2.1/jobs/update']
         payload=json.loads(argv[argv.index('--json')+1])
-        assert payload['job_id']==int(JOB_ID) and set(payload['new_settings'])=={'job_clusters'}
-        calls.append(('job-update',));remote['job_clusters']=payload['new_settings']['job_clusters']
+        assert payload['job_id']==int(JOB_ID) and set(payload['new_settings'])==({'job_clusters','edit_mode'} if 'edit_mode' in remote else {'job_clusters'})
+        calls.append(('job-update',));remote.update(payload['new_settings'])
         return {}
     monkeypatch.setattr(migration,'command',command)
     p=plan()

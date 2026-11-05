@@ -3,7 +3,7 @@ import copy
 import hashlib
 import json
 from plan_guard import require,review
-from single_node_v4 import PRIMARY,NO_FALLBACK,validate_cluster,validate_policy
+from single_node_v4 import PRIMARY,NO_FALLBACK,validate_cluster,validate_policy,normalized_cluster
 
 JOB_ID='210884055971910'
 OLD='Standard_D4ds_v5'
@@ -13,7 +13,7 @@ def canonical_sha(value):
     return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
 
 
-def target_clusters(settings,uc):
+def target_clusters(settings,uc,policy=None):
     require(isinstance(settings,dict),'V4_JOB_SETTINGS_INVALID')
     require(settings.get('run_as',{}).get('service_principal_name')==uc['runner_application_id'] and
             settings.get('max_concurrent_runs')==1 and settings.get('timeout_seconds')==7200 and
@@ -28,8 +28,10 @@ def target_clusters(settings,uc):
     require(isinstance(cluster,dict) and cluster.get('policy_id')==uc['policy_id'] and
             cluster.get('single_user_name')==uc['runner_application_id'],'V4_JOB_POLICY_OR_RUNNER_MISMATCH')
     if cluster.get('node_type_id')==PRIMARY:
-        validate_cluster(cluster)
-        return copy.deepcopy(clusters)
+        validate_cluster(cluster,policy)
+        target=copy.deepcopy(clusters)
+        if policy is not None:target[0]['new_cluster']=normalized_cluster(cluster,policy)
+        return target
     require(cluster.get('node_type_id')==OLD and cluster.get('driver_node_type_id',OLD)==OLD,'V4_ONLY_EXACT_V5_TRANSITION_SUPPORTED')
     require(cluster.get('driver_node_type_flexibility')=={'alternate_node_type_ids':[PRIMARY]} and
             cluster.get('worker_node_type_flexibility',NO_FALLBACK)==NO_FALLBACK,'V4_OLD_FALLBACK_MISMATCH')
@@ -67,3 +69,18 @@ def review_policy_plan(plan,stage):
         before=copy.deepcopy(change['before']);after=copy.deepcopy(change['after'])
         require(before.pop('node_type_id',None) in (OLD,PRIMARY) and after.pop('node_type_id',None)==PRIMARY and before==after,'V4_UNEXPECTED_OUTPUT_CHANGE')
     return changes
+
+
+def normalized_settings(settings,policy):
+    result=copy.deepcopy(settings)
+    for cluster in result.get('job_clusters',[]):
+        cluster['new_cluster']=normalized_cluster(cluster['new_cluster'],policy)
+    return result
+
+
+def verify_settings(actual,expected,policy):
+    # edit_mode is functional (UI_LOCKED != EDITABLE), not serialization noise.
+    require(actual.get('edit_mode')==expected.get('edit_mode') and
+            ('edit_mode' in actual)==('edit_mode' in expected),'V4_EDIT_MODE_CHANGED')
+    require(normalized_settings(actual,policy)==normalized_settings(expected,policy),
+            'V4_POST_UPDATE_SETTINGS_MISMATCH')

@@ -11,7 +11,7 @@ import yaml
 from launch import Launcher,ROOT,UC_WORKSPACE,command,approval
 from plan_guard import require,Blocked,sha
 from single_node_v4 import PRIMARY,read_evidence,validate_policy
-from v4_transition import JOB_ID,target_clusters,canonical_sha
+from v4_transition import JOB_ID,target_clusters,canonical_sha,normalized_settings,verify_settings
 
 
 class MigrationLauncher(Launcher):
@@ -53,7 +53,8 @@ class MigrationLauncher(Launcher):
         require(self.bundle_file.is_file(),'V4_EXISTING_BUNDLE_FILE_REQUIRED')
         self.bundle_sha=sha(self.bundle_file)
         self.before=self.snapshot()
-        self.target=target_clusters(self.before,uc)
+        policy=self.api('get','/api/2.0/policies/clusters/get?policy_id='+uc['policy_id'])
+        self.target=target_clusters(self.before,uc,policy if self.before['job_clusters'][0]['new_cluster'].get('node_type_id')==PRIMARY else None)
         self.transition={'job_id':JOB_ID,'workspace_host':variables['workspace_host'],'policy_id':uc['policy_id'],
                          'before_settings':self.before,'after_job_clusters':self.target,'bundle_yaml_sha256':self.bundle_sha}
         self.fingerprint=canonical_sha(self.transition)
@@ -69,16 +70,21 @@ class MigrationLauncher(Launcher):
         policy=self.api('get','/api/2.0/policies/clusters/get?policy_id='+uc['policy_id'])
         validate_policy(policy,uc['runner_application_id'])
         policy_sha=canonical_sha(policy)
-        if self.before['job_clusters']!=self.target:
+        if normalized_settings(self.before,policy)['job_clusters']!=self.target:
             approval('UPDATE-SILVER-V4-JOB',self.fingerprint)
             require(canonical_sha(json.loads(self.review_path.read_text(encoding='utf-8')))==self.fingerprint,'V4_REVIEW_FILE_CHANGED')
             self.recheck()
             current=self.api('get','/api/2.0/policies/clusters/get?policy_id='+uc['policy_id'])
             require(canonical_sha(current)==policy_sha,'V4_POLICY_CHANGED_AFTER_REVIEW')
             payload={'job_id':int(JOB_ID),'new_settings':{'job_clusters':self.target}}
+            mode=self.before.get('edit_mode')
+            require(mode is None or mode in ('UI_LOCKED','EDITABLE'),'V4_EDIT_MODE_UNSUPPORTED')
+            if mode is not None:payload['new_settings']['edit_mode']=mode
             command(['databricks','api','post','/api/2.1/jobs/update','--json',json.dumps(payload)],env=self.ws_env,json_output=True,timeout=90)
         after=self.snapshot();expected=copy.deepcopy(self.before);expected['job_clusters']=self.target
-        require(after==expected,'V4_POST_UPDATE_SETTINGS_MISMATCH')
+        current=self.api('get','/api/2.0/policies/clusters/get?policy_id='+uc['policy_id'])
+        require(canonical_sha(current)==policy_sha,'V4_POLICY_CHANGED_AFTER_REVIEW')
+        verify_settings(after,expected,current)
         require(sha(self.bundle_file)==self.bundle_sha,'V4_BUNDLE_CHANGED_AFTER_REVIEW')
         bundle=yaml.safe_load(self.bundle_file.read_text(encoding='utf-8'))
         bundle['resources']['jobs']['silver']['job_clusters']=copy.deepcopy(self.target)

@@ -65,7 +65,7 @@ def test_notebook_reports_evidence_failure_before_pipeline(monkeypatch,capsys):
     from types import SimpleNamespace as NS
     from admm_silver import storage,pipeline
     values=dict(catalog='admm_dev',schema='silver',bronze_volume='/Volumes/admm_dev/inputs/bronze',
-        receipt_file='/Volumes/admm_dev/inputs/receipts/synthetic-private.json',account='storage123',
+        receipt_file='/Volumes/admm_dev/inputs/receipts/'+PARENT+'.json',account='storage123',
         parent_run_id=PARENT,execution_id='synthetic-run',replay_check='true',expected_package_version='0.1.0')
     import importlib.metadata
     monkeypatch.setattr(importlib.metadata,'version',lambda name:'0.1.0')
@@ -75,8 +75,8 @@ def test_notebook_reports_evidence_failure_before_pipeline(monkeypatch,capsys):
     monkeypatch.setattr(storage,'verify_volume',lambda *a:None)
     monkeypatch.setattr(pipeline,'run',lambda *a,**k:pytest.fail('No Silver apply after evidence failure'))
     import admm_silver.evidence as evidence
-    def denied(*a,**k):raise PermissionError('synthetic-secret credentials detail')
-    monkeypatch.setattr(evidence,'open',denied,raising=False)
+    def denied(*a,**k):raise SilverError('RECEIPT_FILE_ACCESS_DENIED')
+    monkeypatch.setattr(evidence,'_spark_bytes',denied)
     notebook=Path(__file__).resolve().parents[1]/'notebooks/run_silver.py'
     with pytest.raises(RuntimeError,match='^SILVER_RECEIPT_FILE_ACCESS_DENIED ') as raised:
         exec(compile(notebook.read_text(),str(notebook),'exec'),{'dbutils':dbutils,'spark':spark})
@@ -89,19 +89,18 @@ def test_notebook_reports_evidence_failure_before_pipeline(monkeypatch,capsys):
     assert 'synthetic-' not in output and 'credentials' not in output
 
 
-def test_volume_receipt_driver_read_is_complete_utf8(monkeypatch):
-    # No DBUtils/head fallback: receipt may exceed the usual head preview size.
-    import io
+def test_volume_receipt_read_is_complete_utf8_and_never_uses_open(monkeypatch):
     import admm_silver.evidence as evidence
     path='/Volumes/admm_dev/inputs/receipts/'+PARENT+'.json'
     payload={'parent_run_id':PARENT,'padding':'á'*70000}
-    calls=[]
-    def volume_open(actual,**kwargs):
-        calls.append((actual,kwargs))
-        return io.StringIO(json.dumps(payload,ensure_ascii=False))
-    monkeypatch.setattr(evidence,'open',volume_open,raising=False)
-    assert load_committed_evidence(path,PARENT)==payload
-    assert calls==[(path,{'encoding':'utf-8'})]
+    calls=[];spark=object()
+    def read(actual_spark,actual_path):
+        calls.append((actual_spark,actual_path))
+        return json.dumps(payload,ensure_ascii=False).encode('utf-8')
+    monkeypatch.setattr(evidence,'_spark_bytes',read)
+    monkeypatch.setattr(evidence,'open',lambda *a,**k:pytest.fail('No FUSE'),raising=False)
+    assert load_committed_evidence(path,PARENT,spark=spark)==payload
+    assert calls==[(spark,'dbfs:'+path)]
 
 
 @pytest.mark.parametrize('installed',[None,'0.1.0+e86a2e0b709b','IO_ERROR'])

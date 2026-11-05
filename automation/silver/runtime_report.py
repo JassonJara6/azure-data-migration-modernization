@@ -2,7 +2,7 @@
 import json
 import re
 
-CODES={'PACKAGE_VERSION_UNREADABLE','PACKAGE_VERSION_MISMATCH','PACKAGE_NOT_INSTALLED','RUNTIME_FAILED','RECEIPT_FILE_NOT_FOUND','RECEIPT_FILE_ACCESS_DENIED','RECEIPT_PATH_NOT_FILE',
+CODES={'RECEIPT_VOLUME_FILE_NOT_FOUND','RECEIPT_VOLUME_READ_FAILED','RECEIPT_SINGLE_FILE_REQUIRED','RECEIPT_SIZE_INVALID','RECEIPT_INCOMPLETE_READ','RECEIPT_PARENT_INVALID','RECEIPT_VOLUME_PATH_REQUIRED','RECEIPT_SPARK_READER_REQUIRED','PACKAGE_VERSION_UNREADABLE','PACKAGE_VERSION_MISMATCH','PACKAGE_NOT_INSTALLED','RUNTIME_FAILED','RECEIPT_FILE_NOT_FOUND','RECEIPT_FILE_ACCESS_DENIED','RECEIPT_PATH_NOT_FILE',
  'RECEIPT_INVALID_UTF8','RECEIPT_FILE_IO_FAILED','RECEIPT_OBJECT_REQUIRED','RECEIPT_PARENT_REQUIRED',
  'REQUESTED_PARENT_MISMATCH','DUPLICATE_JSON_KEY','UNCOMMITTED_BUNDLE','MANIFEST_HASH_MISMATCH',
  'PARENT_HASH_MISMATCH','SOURCE_SET_MISMATCH','QUALITY_GATE_FAILED','REPLAY_CHANGED_DELTA'}
@@ -28,4 +28,11 @@ def safe_task_failure(output):
     loc=value.get('location')
     if isinstance(loc,dict) and isinstance(loc.get('file'),str) and re.fullmatch(r'admm_silver/[a-z_]+\.py',loc['file']) and type(loc.get('line')) is int and 0<loc['line']<1000000:
         result['location']={'file':loc['file'],'line':loc['line']}
+    if isinstance(value.get('cause_type'),str) and value['cause_type'] in TYPES:
+        result['cause_type']=value['cause_type']
+    provider=value.get('provider_error_class')
+    if isinstance(provider,str) and provider in {'PATH_NOT_FOUND','FILE_NOT_FOUND','INSUFFICIENT_PERMISSIONS',
+            'PERMISSION_DENIED','INSUFFICIENT_PRIVILEGES','CATALOG_NOT_FOUND','SCHEMA_NOT_FOUND',
+            'UC_VOLUME_NOT_FOUND','CREDENTIAL_NOT_FOUND','EXTERNAL_LOCATION_NOT_FOUND','UNCLASSIFIED'}:
+        result['provider_error_class']=provider
     return result

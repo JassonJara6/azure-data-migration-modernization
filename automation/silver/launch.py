@@ -407,7 +407,13 @@ class Launcher:
             alternates=flexibility.get('alternate_node_type_ids',[])
             require(isinstance(alternates,list) and all(isinstance(a,str) for a in alternates) and len(alternates)==len(set(alternates)) and
                 all(a in ALTERNATES.get(uc['node_type_id'],[]) for a in alternates),'EXISTING_FLEXIBILITY_CONTRACT_MISMATCH')
-            if uc['node_type_id']==V4:validate_v4_cluster(cluster)
+            if uc['node_type_id']==V4:
+                policy=self.api('get','/api/2.0/policies/clusters/get?policy_id='+uc['policy_id'])
+                validate_v4_policy(policy,uc['runner_application_id'])
+                validate_v4_cluster(cluster,policy)
+            if uc['node_type_id']==V4:
+                from v4_transition import normalized_settings
+                clusters=normalized_settings({'job_clusters':clusters},policy)['job_clusters']
             spec['resources']['jobs']['silver']['job_clusters']=clusters
         parent=self.c.get('parent_run_id',PARENT);uuid(parent)
         uri=uc['receipt_volume']+'/'+parent+'.json'

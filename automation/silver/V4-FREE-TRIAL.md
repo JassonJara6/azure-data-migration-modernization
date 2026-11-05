@@ -184,3 +184,8 @@ del esquema CLI (se corrigió el fixture), y una mutación de política durante 
 aprobación (se congela ahora su SHA antes de esperar). La ausencia inicial del CLI
 en el cache temporal se resolvió descargando el binario oficial y verificando SHA.
 No quedan fallos locales pendientes; estos resultados no son evidencia Azure real.
+
+## Recovery after a completed remote migration
+
+For empty flexibility objects or `V4_POST_UPDATE_SETTINGS_MISMATCH`, see
+[V4-RECONCILIATION.md](V4-RECONCILIATION.md). Do not repeat `--apply` to synchronize local files.

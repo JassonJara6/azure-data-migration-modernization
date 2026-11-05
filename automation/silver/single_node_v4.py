@@ -2,6 +2,7 @@
 
 No manual eligibility overrides, imported snapshots, allocation or cloud writes.
 """
+import copy
 import json
 import re
 import time
@@ -133,7 +134,23 @@ def validate_policy(policy,runner=None):
     for key,value in expected.items():require(definition.get(key)=={'type':'fixed','value':value},'V4_POLICY_CONSTRAINT_MISMATCH')
 
 
-def validate_cluster(cluster):
+def normalized_cluster(cluster,policy):
+    """Only an explicitly present empty flexibility OBJECT can be normalized.
+
+    Policy verification is mandatory: missing/null fields never mean disabled.
+    Desired requests still use explicit arrays; this function is for API reads.
+    """
+    validate_policy(policy)
+    result=copy.deepcopy(cluster)
+    if isinstance(result,dict):
+        for key in ('driver_node_type_flexibility','worker_node_type_flexibility'):
+            if key in result and result[key]=={}:
+                result[key]=copy.deepcopy(NO_FALLBACK)
+    return result
+
+
+def validate_cluster(cluster,policy=None):
+    if policy is not None:cluster=normalized_cluster(cluster,policy)
     require(isinstance(cluster,dict),'V4_CLUSTER_INVALID')
     require(type(cluster.get('num_workers')) is int,'V4_WORKERS_INTEGER_REQUIRED')
     for key,value in {'node_type_id':PRIMARY,'driver_node_type_id':PRIMARY,'num_workers':0,

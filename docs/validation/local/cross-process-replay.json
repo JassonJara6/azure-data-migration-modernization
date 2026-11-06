@@ -1,0 +1,64 @@
+{
+  "data_kind": "SYNTHETIC_FIXTURES",
+  "gold_replayed": true,
+  "independent_python_process": true,
+  "same_parent": "30000000-0000-0000-0000-000000000002",
+  "silver_replayed": true,
+  "unchanged": true,
+  "versions_after_original_process": {
+    "local_gold": {
+      "_gold_batches": 3,
+      "_gold_progress": 13,
+      "agg_customer_month": 1,
+      "agg_product_month": 1,
+      "agg_sales_daily": 1,
+      "dim_customer": 1,
+      "dim_date": 0,
+      "dim_product": 1,
+      "fact_sales": 1
+    },
+    "local_silver": {
+      "_silver_batches": 3,
+      "_silver_progress": 21,
+      "person_address": 1,
+      "person_countryregion": 1,
+      "person_person": 1,
+      "person_stateprovince": 1,
+      "production_product": 1,
+      "production_productcategory": 1,
+      "production_productsubcategory": 1,
+      "sales_customer": 1,
+      "sales_salesorderdetail": 1,
+      "sales_salesorderheader": 1,
+      "sales_salesterritory": 1
+    }
+  },
+  "versions_after_second_process": {
+    "local_gold": {
+      "_gold_batches": 3,
+      "_gold_progress": 13,
+      "agg_customer_month": 1,
+      "agg_product_month": 1,
+      "agg_sales_daily": 1,
+      "dim_customer": 1,
+      "dim_date": 0,
+      "dim_product": 1,
+      "fact_sales": 1
+    },
+    "local_silver": {
+      "_silver_batches": 3,
+      "_silver_progress": 21,
+      "person_address": 1,
+      "person_countryregion": 1,
+      "person_person": 1,
+      "person_stateprovince": 1,
+      "production_product": 1,
+      "production_productcategory": 1,
+      "production_productsubcategory": 1,
+      "sales_customer": 1,
+      "sales_salesorderdetail": 1,
+      "sales_salesorderheader": 1,
+      "sales_salesterritory": 1
+    }
+  }
+}

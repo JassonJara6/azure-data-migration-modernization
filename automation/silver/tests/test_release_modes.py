@@ -123,3 +123,16 @@ def test_readonly_artifact_check_requires_original_local_stage(tmp_path,monkeypa
     monkeypatch.setattr(launch,'command',lambda *a,**kw:pytest.fail('No remote calls without original local staging'))
     with pytest.raises(Blocked,match='LOCAL_STAGING_REQUIRED'):
         collector.verify_staged_artifacts('admm-workspace')
+
+
+@pytest.mark.parametrize('code',['RECEIPT_VOLUME_FILE_NOT_FOUND','RECEIPT_VOLUME_READ_FAILED','RECEIPT_SIZE_INVALID','RECEIPT_INCOMPLETE_READ'])
+def test_volume_receipt_diagnostics_survive_safe_task_projection(code):
+    from runtime_report import safe_task_failure
+    detail={'stage':'committed_evidence','error_type':'SilverError','cause_type':'AnalysisException',
+        'provider_error_class':'CATALOG_NOT_FOUND','message':'synthetic-secret'}
+    report=safe_task_failure({'error':'SILVER_'+code+' '+json.dumps(detail)})
+    assert report['error_code']==code and report['cause_type']=='AnalysisException'
+    assert report['provider_error_class']=='CATALOG_NOT_FOUND' and 'synthetic-secret' not in json.dumps(report)
+    detail.update(cause_type='synthetic-secret',provider_error_class='synthetic-secret')
+    report=safe_task_failure({'error':'SILVER_'+code+' '+json.dumps(detail)})
+    assert 'cause_type' not in report and 'provider_error_class' not in report

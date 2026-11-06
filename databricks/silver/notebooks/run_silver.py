@@ -46,7 +46,7 @@ try:
     # Require existing schema with a managed storage location; never create infrastructure.
     spark.sql('DESCRIBE SCHEMA '+namespace).collect()
     stage='committed_evidence'
-    bundle=load_committed_evidence(receipt_file,parent)
+    bundle=load_committed_evidence(receipt_file,parent,spark=spark)
     stage='silver_apply'
     result=run(spark,bundle,account=account,bronze_root=bronze,namespace=namespace,execution_id=dbutils.widgets.get('execution_id'))
     if dbutils.widgets.get('replay_check')=='true':

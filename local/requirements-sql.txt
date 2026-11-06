@@ -1,0 +1,2 @@
+# ODBC Driver 18 is installed separately on the operator's machine.
+pyodbc>=5.1,<6

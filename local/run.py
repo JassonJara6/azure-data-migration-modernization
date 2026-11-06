@@ -37,7 +37,7 @@ def execute(spark,bundle,bronze_root,account,root,*,data_kind):
         raise RuntimeError('LOCAL_REPLAY_CREATED_DELTA_VERSIONS')
     return {'status':'SUCCEEDED','data_kind':data_kind,'parent_run_id':parent,'silver':silver,'gold':gold,
         'replay':{'verified':True,'versions_before':before,'versions_after':after},
-        'azure_validated':False,'source_provenance':('SYNTHETIC_GENERATOR' if data_kind=='SYNTHETIC_FIXTURES' else 'OPERATOR_PROVIDED_LOCAL_FILES')}
+        'azure_validated':False,'source_provenance':{'SYNTHETIC_FIXTURES':'SYNTHETIC_GENERATOR','LOCAL_SQL_SERVER_EXPORT':'SQL_SERVER_LOCAL'}.get(data_kind,'OPERATOR_PROVIDED_LOCAL_FILES')}
 
 
 def main():

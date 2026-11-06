@@ -89,3 +89,14 @@ Reports include input/target/rejected row counts and exact reconciled sales tota
 Follow [the local guide](local/README.md) for a second process, an updated second
 parent, existing real local receipts/Parquet mirrors and tests. No real-looking
 receipts are invented in operator-provided data mode.
+
+## Validate against the existing real SQL Server locally
+
+The [AdventureWorks SQL export procedure](local/SQL-SERVER.md) provides one run
+from local SQL → typed Bronze Parquet → the same eleven Silver/seven Gold tables
+→ no-write replay. It uses environment credentials, a read-only serializable SQL
+transaction, verified local manifests and the original processing contracts.
+The operator's Product=504 / SalesOrderDetail=121317 counts are enforced as
+expectations, not claimed as developer-observed results. **Real SQL acceptance
+is pending execution on the operator machine** ([validation scope](docs/validation/local-sql/REPORT.md));
+no Azure receipt, watermark or infrastructure is changed.

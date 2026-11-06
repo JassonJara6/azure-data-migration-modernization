@@ -79,3 +79,11 @@ also executes the four CLI invocations above. `pytest` fixtures use temporary
 storage; no paid services or real personal records are needed. See the Gold
 [model decisions](../databricks/gold/README.md) and the checked-in
 [local acceptance report](../docs/validation/local/REPORT.md).
+
+## Export the existing local AdventureWorks SQL Server
+
+Use [the one-command SQL procedure](SQL-SERVER.md) to create typed local Bronze
+Parquet directly from the existing database, then run Silver/Gold and replay.
+It uses environment credentials and read-only SQL, labels its manifest as local
+authority and does not manufacture a remote COMMITTED receipt. Actual SQL/Windows
+acceptance requires running it on the machine hosting the accessible database.
